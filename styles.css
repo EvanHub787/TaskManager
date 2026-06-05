@@ -398,6 +398,16 @@ textarea {
   font-size: 15px;
 }
 
+.task-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.task-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .meta,
 .tags {
   display: flex;

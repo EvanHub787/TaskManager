@@ -51,6 +51,7 @@ const els = {
   taskStatus: document.querySelector("#taskStatus"),
   taskPriority: document.querySelector("#taskPriority"),
   taskNext: document.querySelector("#taskNext"),
+  taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
   deleteTaskBtn: document.querySelector("#deleteTaskBtn"),
   closeDialog: document.querySelector("#closeDialog"),
@@ -374,9 +375,12 @@ function taskCard(task) {
   const priorityClass = task.priority === "高" ? "high" : task.priority === "中" ? "middle" : "low";
   const canAdvance = task.type === "issue" && task.status !== completedStatus;
   const canFinish = !isDone(task);
+  const title = task.link
+    ? `<a class="task-link" href="${escapeHtml(normalizeUrl(task.link))}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.title)}</a>`
+    : escapeHtml(task.title);
   return `
     <article class="task-card ${urgencyClass}">
-      <h4>${escapeHtml(task.title)}</h4>
+      <h4>${title}</h4>
       <div class="meta">${taskLabel(task)} · ${escapeHtml(task.project)} · ${escapeHtml(task.owner)} · ${formatDue(task.due)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
@@ -625,6 +629,7 @@ function openTaskDialog(id) {
   els.taskDue.value = task?.due || todayOffset(3);
   els.taskPriority.value = task?.priority || "中";
   els.taskNext.value = task?.next || "";
+  els.taskLink.value = task?.link || "";
   els.taskNotes.value = task?.notes || "";
   els.dialog.showModal();
 }
@@ -647,6 +652,7 @@ function saveTask(event) {
     status: els.taskStatus.value,
     priority: els.taskPriority.value,
     next: els.taskNext.value.trim(),
+    link: normalizeUrl(els.taskLink.value),
     notes: els.taskNotes.value.trim()
   };
 
@@ -782,6 +788,7 @@ function migrateState(rawState) {
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
       priority: priorities.includes(task.priority) ? task.priority : "中",
       next: task.next || "次のアクションを確認する。",
+      link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       notes: task.notes || ""
     };
   });
@@ -828,6 +835,18 @@ function taskLabel(task) {
   return task.type === "todo" ? "Todo" : "Issue";
 }
 
+function normalizeUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+  return `https://${url}`;
+}
+
+function extractUrl(value) {
+  const match = String(value || "").match(/https?:\/\/[^\s]+/i);
+  return match ? match[0] : "";
+}
+
 function issueTask(title, project, owner, due, status, priority, next, notes) {
   return {
     id: crypto.randomUUID(),
@@ -839,6 +858,7 @@ function issueTask(title, project, owner, due, status, priority, next, notes) {
     status,
     priority,
     next,
+    link: "",
     notes
   };
 }
@@ -854,6 +874,7 @@ function todoTask(title, owner, due, priority, next, notes) {
     status: todoOpenStatus,
     priority,
     next,
+    link: "",
     notes
   };
 }

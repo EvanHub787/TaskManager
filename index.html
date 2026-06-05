@@ -112,7 +112,8 @@
         <label>優先度<select id="taskPriority" required></select></label>
       </div>
       <label class="full-label">次のアクション<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
-      <label class="full-label">メモ / リンク<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
+      <label class="full-label">Issue URL<input id="taskLink" inputmode="url" maxlength="300" placeholder="https://example.com/issues/123"></label>
+      <label class="full-label">メモ<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
       <div class="dialog-actions">
         <button id="deleteTaskBtn" class="danger-button" type="button">削除</button>
         <span class="spacer"></span>
