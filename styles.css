@@ -165,8 +165,11 @@ svg {
 .workspace {
   min-width: 0;
   height: 100vh;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 24px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  row-gap: 18px;
 }
 
 .topbar {
@@ -174,7 +177,7 @@ svg {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
 }
 
 .eyebrow {
@@ -254,7 +257,10 @@ svg {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 180px 160px auto;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 10px 18px rgba(27, 42, 35, .04);
 }
 
 .search-box {
@@ -297,6 +303,10 @@ textarea {
 
 .view {
   display: none;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  padding-bottom: 24px;
 }
 
 .view.active {
@@ -655,6 +665,24 @@ label {
   .workspace {
     height: auto;
     overflow: visible;
+    display: block;
+  }
+
+  .topbar,
+  .filters {
+    margin-bottom: 18px;
+  }
+
+  .filters {
+    padding-bottom: 0;
+    border-bottom: 0;
+    box-shadow: none;
+  }
+
+  .view {
+    overflow: visible;
+    padding-right: 0;
+    padding-bottom: 0;
   }
 
   .nav-tabs {
