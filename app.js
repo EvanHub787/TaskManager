@@ -398,6 +398,12 @@ function taskCard(task) {
 }
 
 function wireTaskButtons(root) {
+  root.querySelectorAll(".task-link").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.open(link.href, "_blank", "noopener,noreferrer");
+    });
+  });
   root.querySelectorAll("[data-edit]").forEach((button) => {
     button.addEventListener("click", () => openTaskDialog(button.dataset.edit));
   });
