@@ -473,6 +473,13 @@ textarea {
 .cards {
   display: grid;
   gap: 10px;
+  min-height: 72px;
+  border-radius: 8px;
+  transition: background-color .15s ease;
+}
+
+.cards.drop-active {
+  background: rgba(18, 113, 91, .08);
 }
 
 .task-card {
@@ -482,6 +489,19 @@ textarea {
   background: var(--panel);
   padding: 12px;
   box-shadow: 0 8px 18px rgba(27, 42, 35, .05);
+}
+
+.task-card[draggable="true"] {
+  cursor: grab;
+}
+
+.task-card.dragging {
+  cursor: grabbing;
+  opacity: .45;
+}
+
+.task-card.drop-before {
+  box-shadow: 0 -4px 0 var(--accent), 0 8px 18px rgba(27, 42, 35, .05);
 }
 
 .task-card.overdue {

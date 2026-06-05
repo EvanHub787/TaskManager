@@ -240,17 +240,18 @@ function renderBoard() {
   els.boardView.innerHTML = `
     <div class="board">
       ${state.workflow.map((status) => {
-        const tasks = visible.filter((task) => task.status === status).sort(sortByUrgency);
+        const tasks = visible.filter((task) => task.status === status).sort(sortByBoardOrder);
         return `
-          <div class="column">
+          <div class="column" data-status="${escapeHtml(status)}">
             <div class="column-title"><span>${escapeHtml(status)}</span><span class="tag">${tasks.length}</span></div>
-            <div class="cards">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">Issue はありません</div>`}</div>
+            <div class="cards" data-drop-status="${escapeHtml(status)}">${tasks.length ? tasks.map((task) => taskCard(task, true)).join("") : `<div class="empty">Issue はありません</div>`}</div>
           </div>
         `;
       }).join("")}
     </div>
   `;
   wireTaskButtons(els.boardView);
+  wireBoardDragAndDrop();
 }
 
 function renderWorkflowTopControl() {
@@ -384,11 +385,11 @@ function renderPeople() {
 function taskSection(title, tasks) {
   return `
     <div class="section-title"><h3>${title}</h3><span class="tag">${tasks.length}</span></div>
-    <div class="cards">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">項目はありません</div>`}</div>
+    <div class="cards">${tasks.length ? tasks.map((task) => taskCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
   `;
 }
 
-function taskCard(task) {
+function taskCard(task, enableDrag = false) {
   const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
   const priorityClass = task.priority === "高" ? "high" : task.priority === "中" ? "middle" : "low";
   const canAdvance = task.type === "issue" && task.status !== completedStatus;
@@ -397,7 +398,7 @@ function taskCard(task) {
     ? `<a class="task-link" href="${escapeHtml(normalizeUrl(task.link))}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.title)}</a>`
     : escapeHtml(task.title);
   return `
-    <article class="task-card ${urgencyClass}">
+    <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <h4>${title}</h4>
       <div class="meta">${taskLabel(task)} · ${escapeHtml(task.project)} · ${escapeHtml(task.owner)} · ${formatDue(task.due)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
@@ -448,6 +449,102 @@ function wireTaskButtons(root) {
       render();
     });
   });
+}
+
+function wireBoardDragAndDrop() {
+  els.boardView.querySelectorAll(".task-card[draggable='true']").forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.taskId);
+      card.classList.add("dragging");
+    });
+
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      clearDropIndicators();
+    });
+
+    card.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const draggingId = event.dataTransfer.getData("text/plain");
+      if (draggingId && draggingId !== card.dataset.taskId) {
+        card.classList.add("drop-before");
+      }
+    });
+
+    card.addEventListener("dragleave", () => {
+      card.classList.remove("drop-before");
+    });
+
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const draggedId = event.dataTransfer.getData("text/plain");
+      if (!draggedId || draggedId === card.dataset.taskId) return;
+      const targetStatus = card.closest("[data-drop-status]")?.dataset.dropStatus;
+      moveIssueTask(draggedId, targetStatus, card.dataset.taskId);
+    });
+  });
+
+  els.boardView.querySelectorAll("[data-drop-status]").forEach((dropZone) => {
+    dropZone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropZone.classList.add("drop-active");
+    });
+
+    dropZone.addEventListener("dragleave", (event) => {
+      if (!dropZone.contains(event.relatedTarget)) {
+        dropZone.classList.remove("drop-active");
+      }
+    });
+
+    dropZone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const draggedId = event.dataTransfer.getData("text/plain");
+      const cardTarget = event.target.closest(".task-card");
+      if (!draggedId || cardTarget) return;
+      moveIssueTask(draggedId, dropZone.dataset.dropStatus, "");
+    });
+  });
+}
+
+function moveIssueTask(taskId, targetStatus, beforeId) {
+  const task = state.tasks.find((item) => item.id === taskId && item.type === "issue");
+  if (!task || !targetStatus) return;
+  const sourceStatus = task.status;
+  const targetTasks = state.tasks
+    .filter((item) => item.type === "issue" && item.status === targetStatus && item.id !== taskId)
+    .sort(sortByBoardOrder);
+  const beforeIndex = beforeId ? targetTasks.findIndex((item) => item.id === beforeId) : -1;
+  const insertIndex = beforeIndex >= 0 ? beforeIndex : targetTasks.length;
+  targetTasks.splice(insertIndex, 0, { ...task, status: targetStatus });
+
+  state.tasks = state.tasks.map((item) => {
+    if (item.id === taskId) return { ...item, status: targetStatus, order: insertIndex };
+    if (item.type === "issue" && item.status === targetStatus) {
+      const index = targetTasks.findIndex((targetTask) => targetTask.id === item.id);
+      return index >= 0 ? { ...item, order: index } : item;
+    }
+    return item;
+  });
+
+  if (sourceStatus !== targetStatus) {
+    reindexIssueStatus(sourceStatus);
+  }
+  reindexIssueStatus(targetStatus);
+  render();
+}
+
+function reindexIssueStatus(status) {
+  const ordered = state.tasks
+    .filter((task) => task.type === "issue" && task.status === status)
+    .sort(sortByBoardOrder);
+  const indexById = new Map(ordered.map((task, index) => [task.id, index]));
+  state.tasks = state.tasks.map((task) => indexById.has(task.id) ? { ...task, order: indexById.get(task.id) } : task);
+}
+
+function clearDropIndicators() {
+  els.boardView.querySelectorAll(".drop-active").forEach((element) => element.classList.remove("drop-active"));
+  els.boardView.querySelectorAll(".drop-before").forEach((element) => element.classList.remove("drop-before"));
 }
 
 function wireWorkflowButtons() {
@@ -668,6 +765,7 @@ function saveTask(event) {
   event.preventDefault();
   const id = els.taskId.value || crypto.randomUUID();
   const type = els.taskType.value;
+  const existingTask = state.tasks.find((item) => item.id === id);
   const task = {
     id,
     type,
@@ -679,6 +777,7 @@ function saveTask(event) {
     priority: els.taskPriority.value,
     next: els.taskNext.value.trim(),
     link: normalizeUrl(els.taskLink.value),
+    order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
     notes: els.taskNotes.value.trim()
   };
 
@@ -798,7 +897,7 @@ function migrateState(rawState) {
     tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks
   };
 
-  migrated.tasks = migrated.tasks.map((task) => {
+  migrated.tasks = migrated.tasks.map((task, index) => {
     const type = task.type === "todo" ? "todo" : "issue";
     const fallbackStatus = type === "todo" ? todoOpenStatus : migrated.workflow[0];
     const mappedStatus = statusMap[task.status] || task.status || fallbackStatus;
@@ -815,6 +914,7 @@ function migrateState(rawState) {
       priority: priorities.includes(task.priority) ? task.priority : "中",
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
+      order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || ""
     };
   });
@@ -832,6 +932,12 @@ function sortByUrgency(a, b) {
     || daysUntil(a.due) - daysUntil(b.due)
     || priorityWeight[a.priority] - priorityWeight[b.priority]
     || typeWeight(a) - typeWeight(b);
+}
+
+function sortByBoardOrder(a, b) {
+  const orderA = Number.isFinite(a.order) ? a.order : 0;
+  const orderB = Number.isFinite(b.order) ? b.order : 0;
+  return orderA - orderB || sortByUrgency(a, b);
 }
 
 function groupBy(items, key) {
@@ -885,6 +991,7 @@ function issueTask(title, project, owner, due, status, priority, next, notes) {
     priority,
     next,
     link: "",
+    order: Date.now(),
     notes
   };
 }
@@ -901,6 +1008,7 @@ function todoTask(title, owner, due, priority, next, notes) {
     priority,
     next,
     link: "",
+    order: Date.now(),
     notes
   };
 }
