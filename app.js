@@ -35,6 +35,7 @@ const els = {
   priorityFilter: document.querySelector("#priorityFilter"),
   resetFilters: document.querySelector("#resetFilters"),
   addTaskBtn: document.querySelector("#addTaskBtn"),
+  workflowTopSlot: document.querySelector("#workflowTopSlot"),
   openDataFileBtn: document.querySelector("#openDataFileBtn"),
   saveDataFileBtn: document.querySelector("#saveDataFileBtn"),
   exportBtn: document.querySelector("#exportBtn"),
@@ -122,6 +123,7 @@ function fillStatusSelect(type, selected) {
 function render() {
   state = migrateState(state);
   syncMembersFromTasks();
+  renderWorkflowTopControl();
   renderFilterOptions();
   renderProjectList();
   renderTodayFocus();
@@ -236,18 +238,6 @@ function renderDashboard() {
 function renderBoard() {
   const visible = filteredTasks().filter((task) => task.type === "issue" && task.status !== completedStatus);
   els.boardView.innerHTML = `
-    <details class="workflow-panel collapsible-panel">
-      <summary>フロー編集</summary>
-      <div class="collapsible-body">
-        <form id="workflowForm" class="workflow-form">
-          <input id="newStepName" maxlength="20" placeholder="新しいフローステップ">
-          <button class="primary-button" type="submit">ステップ追加</button>
-        </form>
-        <div class="workflow-list">
-          ${state.workflow.map((step, index) => workflowStepRow(step, index)).join("")}
-        </div>
-      </div>
-    </details>
     <div class="board">
       ${state.workflow.map((status) => {
         const tasks = visible.filter((task) => task.status === status).sort(sortByUrgency);
@@ -260,8 +250,30 @@ function renderBoard() {
       }).join("")}
     </div>
   `;
-  wireWorkflowButtons();
   wireTaskButtons(els.boardView);
+}
+
+function renderWorkflowTopControl() {
+  if (currentView() !== "board") {
+    els.workflowTopSlot.innerHTML = "";
+    return;
+  }
+
+  els.workflowTopSlot.innerHTML = `
+    <details class="action-menu workflow-top-menu">
+      <summary class="secondary-button">フロー編集</summary>
+      <div class="action-menu-content workflow-menu-content">
+        <form id="workflowForm" class="workflow-form">
+          <input id="newStepName" maxlength="20" placeholder="新しいフローステップ">
+          <button class="primary-button" type="submit">ステップ追加</button>
+        </form>
+        <div class="workflow-list">
+          ${state.workflow.map((step, index) => workflowStepRow(step, index)).join("")}
+        </div>
+      </div>
+    </details>
+  `;
+  wireWorkflowButtons();
 }
 
 function workflowStepRow(step, index) {
@@ -439,22 +451,23 @@ function wireTaskButtons(root) {
 }
 
 function wireWorkflowButtons() {
-  const form = els.boardView.querySelector("#workflowForm");
+  const form = els.workflowTopSlot.querySelector("#workflowForm");
+  if (!form) return;
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const input = els.boardView.querySelector("#newStepName");
+    const input = els.workflowTopSlot.querySelector("#newStepName");
     addWorkflowStep(input.value);
   });
 
-  els.boardView.querySelectorAll("[data-save-step]").forEach((button) => {
+  els.workflowTopSlot.querySelectorAll("[data-save-step]").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.saveStep);
-      const input = els.boardView.querySelector(`[data-step-name="${index}"]`);
+      const input = els.workflowTopSlot.querySelector(`[data-step-name="${index}"]`);
       renameWorkflowStep(index, input.value);
     });
   });
 
-  els.boardView.querySelectorAll("[data-delete-step]").forEach((button) => {
+  els.workflowTopSlot.querySelectorAll("[data-delete-step]").forEach((button) => {
     button.addEventListener("click", () => deleteWorkflowStep(Number(button.dataset.deleteStep)));
   });
 }
@@ -624,6 +637,7 @@ function switchView(view) {
   document.querySelectorAll(".view").forEach((section) => section.classList.remove("active"));
   document.querySelector(`#${view}View`).classList.add("active");
   els.pageTitle.textContent = titles[view];
+  renderWorkflowTopControl();
 }
 
 function openTaskDialog(id) {

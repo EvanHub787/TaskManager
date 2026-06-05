@@ -196,6 +196,10 @@ svg {
   gap: 10px;
 }
 
+#workflowTopSlot:empty {
+  display: none;
+}
+
 .action-menu {
   position: relative;
 }
@@ -235,6 +239,12 @@ svg {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+}
+
+.workflow-menu-content {
+  width: min(640px, calc(100vw - 340px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
 }
 
 .action-menu:not([open]) .action-menu-content {
