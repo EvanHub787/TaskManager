@@ -55,15 +55,18 @@
           <h2 id="pageTitle">作業概要</h2>
         </div>
         <div class="actions">
-          <button id="openDataFileBtn" class="secondary-button" type="button">データファイルを開く</button>
-          <button id="saveDataFileBtn" class="secondary-button" type="button">データファイルへ保存</button>
-          <button id="exportBtn" class="icon-button" type="button" title="データをエクスポート" aria-label="データをエクスポート">
-            <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"></path></svg>
-          </button>
-          <label class="icon-button" title="データをインポート" aria-label="データをインポート">
-            <input id="importFile" type="file" accept="application/json">
-            <svg viewBox="0 0 24 24"><path d="M12 21V9m0 0 4 4m-4-4-4 4M4 7V4h16v3"></path></svg>
-          </label>
+          <details class="action-menu">
+            <summary class="secondary-button">データ管理</summary>
+            <div class="action-menu-content">
+              <button id="openDataFileBtn" class="secondary-button" type="button">データファイルを開く</button>
+              <button id="saveDataFileBtn" class="secondary-button" type="button">データファイルへ保存</button>
+              <button id="exportBtn" class="secondary-button" type="button">エクスポート</button>
+              <label class="secondary-button file-button">
+                インポート
+                <input id="importFile" type="file" accept="application/json">
+              </label>
+            </div>
+          </details>
           <button id="addTaskBtn" class="primary-button" type="button">
             <span>＋</span>新規
           </button>

@@ -236,15 +236,18 @@ function renderDashboard() {
 function renderBoard() {
   const visible = filteredTasks().filter((task) => task.type === "issue" && task.status !== completedStatus);
   els.boardView.innerHTML = `
-    <div class="workflow-panel">
-      <form id="workflowForm" class="workflow-form">
-        <input id="newStepName" maxlength="20" placeholder="新しいフローステップ">
-        <button class="primary-button" type="submit">ステップ追加</button>
-      </form>
-      <div class="workflow-list">
-        ${state.workflow.map((step, index) => workflowStepRow(step, index)).join("")}
+    <details class="workflow-panel collapsible-panel">
+      <summary>フロー編集</summary>
+      <div class="collapsible-body">
+        <form id="workflowForm" class="workflow-form">
+          <input id="newStepName" maxlength="20" placeholder="新しいフローステップ">
+          <button class="primary-button" type="submit">ステップ追加</button>
+        </form>
+        <div class="workflow-list">
+          ${state.workflow.map((step, index) => workflowStepRow(step, index)).join("")}
+        </div>
       </div>
-    </div>
+    </details>
     <div class="board">
       ${state.workflow.map((status) => {
         const tasks = visible.filter((task) => task.status === status).sort(sortByUrgency);
@@ -351,13 +354,16 @@ function renderPeople() {
   }).join("");
 
   els.peopleView.innerHTML = `
-    <div class="member-panel">
-      <form id="memberForm" class="member-form">
-        <input id="newMemberName" maxlength="24" placeholder="新しいメンバー名">
-        <button class="primary-button" type="submit">メンバー追加</button>
-      </form>
-      <div class="member-list">${memberRows}</div>
-    </div>
+    <details class="member-panel collapsible-panel">
+      <summary>メンバー編集</summary>
+      <div class="collapsible-body">
+        <form id="memberForm" class="member-form">
+          <input id="newMemberName" maxlength="24" placeholder="新しいメンバー名">
+          <button class="primary-button" type="submit">メンバー追加</button>
+        </form>
+        <div class="member-list">${memberRows}</div>
+      </div>
+    </details>
     <table class="list-table"><thead><tr><th>担当者</th><th>未完了</th><th>Issue</th><th>Todo</th><th>期限超過</th><th>次の対応</th></tr></thead><tbody>${rows}</tbody></table>
   `;
   wireMemberButtons();
