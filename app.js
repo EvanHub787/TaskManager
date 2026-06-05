@@ -141,7 +141,7 @@ async function openDataFile() {
   try {
     const [handle] = await window.showOpenFilePicker({
       types: [{
-        description: "Follow 数据文件",
+        description: "TaskManager 数据文件",
         accept: { "application/json": [".json"] }
       }],
       multiple: false
@@ -170,9 +170,9 @@ async function saveDataFile() {
   try {
     if (!dataFileHandle) {
       dataFileHandle = await window.showSaveFilePicker({
-        suggestedName: `follow-manager-${new Date().toISOString().slice(0, 10)}.json`,
+        suggestedName: `task-manager-${new Date().toISOString().slice(0, 10)}.json`,
         types: [{
-          description: "Follow 数据文件",
+          description: "TaskManager 数据文件",
           accept: { "application/json": [".json"] }
         }]
       });
@@ -696,7 +696,7 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `follow-manager-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `task-manager-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
 }

@@ -1,4 +1,4 @@
-# Follow 工作管理
+# TaskManager
 
 一个本地运行的轻量项目管理工具，用于管理 Issue 流程、Todo 收件箱、成员和项目进度。
 
