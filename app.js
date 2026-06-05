@@ -1,16 +1,16 @@
-const defaultWorkflow = ["调查", "修正", "测试", "MR"];
-const completedStatus = "已完成";
-const todoOpenStatus = "待办";
-const todoDoneStatus = "已完成";
+const defaultWorkflow = ["調査中", "修正中", "テスト中", "MR"];
+const completedStatus = "完了";
+const todoOpenStatus = "未対応";
+const todoDoneStatus = "完了";
 const priorities = ["高", "中", "低"];
-const defaultMembers = ["我", "成员A", "成员B", "成员C", "成员D", "成员E"];
+const defaultMembers = ["自分", "メンバーA", "メンバーB", "メンバーC", "メンバーD", "メンバーE"];
 const storageKey = "follow-manager-v1";
 
 const sampleTasks = [
-  issueTask("确认 Issue 处理流程", "团队管理", "我", todayOffset(0), "调查", "高", "把 Issue 从调查、修正、测试、MR 四步跑通。", "流程可以在 Issue 页面自定义。"),
-  issueTask("客户反馈页面异常", "客户项目", "成员A", todayOffset(2), "修正", "高", "定位触发条件，修正后提交 MR。", ""),
-  issueTask("回归测试登录流程", "产品稳定性", "成员B", todayOffset(1), "测试", "中", "按测试清单验证修复影响范围。", ""),
-  todoTask("整理客户临时需求 memo", "我", todayOffset(1), "中", "把 txt 里的散点需求整理成 Todo，再决定是否转 Issue。", "")
+  issueTask("Issue 対応フローを確認", "チーム管理", "自分", todayOffset(0), "調査中", "高", "Issue を調査、修正、テスト、MR の流れで管理できるか確認する。", "Issue 画面でフローをカスタマイズできます。"),
+  issueTask("顧客フィードバック画面の不具合", "顧客案件", "メンバーA", todayOffset(2), "修正中", "高", "発生条件を特定し、修正後に MR を作成する。", ""),
+  issueTask("ログインフローの回帰テスト", "品質改善", "メンバーB", todayOffset(1), "テスト中", "中", "テスト観点に沿って修正影響範囲を確認する。", ""),
+  todoTask("顧客からの一時依頼 memo を整理", "自分", todayOffset(1), "中", "txt のメモを Todo に分解し、Issue 化するか判断する。", "")
 ];
 
 let state = migrateState(loadState());
@@ -134,14 +134,14 @@ function render() {
 
 async function openDataFile() {
   if (!window.showOpenFilePicker) {
-    alert("当前浏览器不支持直接打开数据文件。请使用右上角导入按钮，或在 Windows 的 Chrome / Edge 中使用。");
+    alert("このブラウザはデータファイルの直接読み込みに対応していません。右上のインポートボタンを使うか、Windows の Chrome / Edge で利用してください。");
     return;
   }
 
   try {
     const [handle] = await window.showOpenFilePicker({
       types: [{
-        description: "TaskManager 数据文件",
+        description: "TaskManager データファイル",
         accept: { "application/json": [".json"] }
       }],
       multiple: false
@@ -152,10 +152,10 @@ async function openDataFile() {
     dataFileHandle = handle;
     state = migrateState(imported);
     render();
-    alert("数据文件已打开。之后修改后请点“保存到数据文件”。");
+    alert("データファイルを開きました。変更後は「データファイルへ保存」を押してください。");
   } catch (error) {
     if (error.name !== "AbortError") {
-      alert("打开失败，请确认选择的是本工具的数据 JSON 文件。");
+      alert("読み込みに失敗しました。TaskManager の JSON データファイルを選択してください。");
     }
   }
 }
@@ -163,7 +163,7 @@ async function openDataFile() {
 async function saveDataFile() {
   if (!window.showSaveFilePicker) {
     exportData();
-    alert("当前浏览器不支持直接写入文件，已改为下载备份 JSON。");
+    alert("このブラウザはファイルへの直接保存に対応していません。代わりにバックアップ JSON をダウンロードします。");
     return;
   }
 
@@ -172,7 +172,7 @@ async function saveDataFile() {
       dataFileHandle = await window.showSaveFilePicker({
         suggestedName: `task-manager-${new Date().toISOString().slice(0, 10)}.json`,
         types: [{
-          description: "TaskManager 数据文件",
+          description: "TaskManager データファイル",
           accept: { "application/json": [".json"] }
         }]
       });
@@ -180,16 +180,16 @@ async function saveDataFile() {
     const writable = await dataFileHandle.createWritable();
     await writable.write(JSON.stringify(state, null, 2));
     await writable.close();
-    alert("已保存到数据文件。");
+    alert("データファイルへ保存しました。");
   } catch (error) {
     if (error.name !== "AbortError") {
-      alert("保存失败。请尝试右上角导出备份。");
+      alert("保存に失敗しました。右上のエクスポートでバックアップしてください。");
     }
   }
 }
 
 function renderFilterOptions() {
-  const ownerOptions = [`<option value="all">全部负责人</option>`]
+  const ownerOptions = [`<option value="all">すべての担当者</option>`]
     .concat(state.members.map((member) => `<option value="${escapeHtml(member)}">${escapeHtml(member)}</option>`));
   els.ownerFilter.innerHTML = ownerOptions.join("");
   els.ownerFilter.value = filters.owner;
@@ -209,7 +209,7 @@ function renderTodayFocus() {
 
   els.todayFocus.innerHTML = focusTasks.length
     ? focusTasks.map((task) => `<div class="focus-item"><strong>${escapeHtml(task.title)}</strong><span>${taskLabel(task)} · ${escapeHtml(task.owner)} · ${formatDue(task.due)}</span></div>`).join("")
-    : `<div class="focus-item">暂无待跟进事项</div>`;
+    : `<div class="focus-item">フォロー対象はありません</div>`;
 }
 
 function renderDashboard() {
@@ -221,13 +221,13 @@ function renderDashboard() {
 
   els.dashboardView.innerHTML = `
     <div class="stats-grid">
-      ${stat("未完成事项", openTasks.length)}
-      ${stat("Issue 进行中", issues.length)}
-      ${stat("Todo 待办", todos.length)}
-      ${stat("已逾期", overdue.length)}
+      ${stat("未完了", openTasks.length)}
+      ${stat("対応中 Issue", issues.length)}
+      ${stat("未対応 Todo", todos.length)}
+      ${stat("期限超過", overdue.length)}
     </div>
-    ${taskSection("需要优先处理", visible.filter((task) => !isDone(task)).sort(sortByUrgency).slice(0, 8))}
-    ${taskSection("最近完成", visible.filter(isDone).slice(0, 8))}
+    ${taskSection("優先対応", visible.filter((task) => !isDone(task)).sort(sortByUrgency).slice(0, 8))}
+    ${taskSection("最近の完了", visible.filter(isDone).slice(0, 8))}
   `;
   wireTaskButtons(els.dashboardView);
 }
@@ -237,8 +237,8 @@ function renderBoard() {
   els.boardView.innerHTML = `
     <div class="workflow-panel">
       <form id="workflowForm" class="workflow-form">
-        <input id="newStepName" maxlength="20" placeholder="新增流程步骤">
-        <button class="primary-button" type="submit">新增步骤</button>
+        <input id="newStepName" maxlength="20" placeholder="新しいフローステップ">
+        <button class="primary-button" type="submit">ステップ追加</button>
       </form>
       <div class="workflow-list">
         ${state.workflow.map((step, index) => workflowStepRow(step, index)).join("")}
@@ -250,7 +250,7 @@ function renderBoard() {
         return `
           <div class="column">
             <div class="column-title"><span>${escapeHtml(status)}</span><span class="tag">${tasks.length}</span></div>
-            <div class="cards">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">暂无 Issue</div>`}</div>
+            <div class="cards">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">Issue はありません</div>`}</div>
           </div>
         `;
       }).join("")}
@@ -264,10 +264,10 @@ function workflowStepRow(step, index) {
   const used = state.tasks.some((task) => task.type === "issue" && task.status === step);
   return `
     <div class="workflow-row">
-      <input value="${escapeHtml(step)}" data-step-name="${index}" aria-label="流程步骤名称">
+      <input value="${escapeHtml(step)}" data-step-name="${index}" aria-label="フローステップ名">
       <span class="tag">${used ? "使用中" : "未使用"}</span>
       <button class="tiny-button" data-save-step="${index}" type="button">保存</button>
-      <button class="tiny-button" data-delete-step="${index}" type="button" ${used || state.workflow.length <= 1 ? "disabled" : ""}>删除</button>
+      <button class="tiny-button" data-delete-step="${index}" type="button" ${used || state.workflow.length <= 1 ? "disabled" : ""}>削除</button>
     </div>
   `;
 }
@@ -280,15 +280,15 @@ function renderTodo() {
   els.todoView.innerHTML = `
     <div class="todo-capture">
       <form id="todoForm">
-        <textarea id="todoMemo" rows="5" placeholder="把 txt 里的临时事项粘贴到这里；每一行会变成一个 Todo"></textarea>
+        <textarea id="todoMemo" rows="5" placeholder="txt の一時メモをここに貼り付けます。1行ごとに Todo として登録されます"></textarea>
         <div class="todo-actions">
           <input id="todoTxtFile" type="file" accept=".txt,text/plain">
-          <button class="primary-button" type="submit">加入 Todo</button>
+          <button class="primary-button" type="submit">Todo に追加</button>
         </div>
       </form>
     </div>
-    ${taskSection("Todo 待办", open)}
-    ${taskSection("Todo 已完成", done)}
+    ${taskSection("未対応 Todo", open)}
+    ${taskSection("完了 Todo", done)}
   `;
   wireTodoButtons();
   wireTaskButtons(els.todoView);
@@ -307,14 +307,14 @@ function renderProjects() {
         <td>${tasks.length}</td>
         <td>${progress}%</td>
         <td>${high}</td>
-        <td>${next ? `${escapeHtml(next.title)}<br><span class="meta">${taskLabel(next)} · ${escapeHtml(next.owner)} · ${formatDue(next.due)}</span>` : "暂无"}</td>
+        <td>${next ? `${escapeHtml(next.title)}<br><span class="meta">${taskLabel(next)} · ${escapeHtml(next.owner)} · ${formatDue(next.due)}</span>` : "なし"}</td>
       </tr>
     `;
   }).join("");
 
   els.projectsView.innerHTML = rows
-    ? `<table class="list-table"><thead><tr><th>项目</th><th>事项数</th><th>完成度</th><th>高优先级未完成</th><th>下一件事</th></tr></thead><tbody>${rows}</tbody></table>`
-    : `<div class="empty">暂无项目</div>`;
+    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>完了率</th><th>高優先度の未完了</th><th>次の対応</th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<div class="empty">案件はありません</div>`;
 }
 
 function renderPeople() {
@@ -332,7 +332,7 @@ function renderPeople() {
         <td>${issues.length}</td>
         <td>${todos.length}</td>
         <td>${overdue.length}</td>
-        <td>${next ? `${escapeHtml(next.title)}<br><span class="meta">${taskLabel(next)} · ${formatDue(next.due)}</span>` : "暂无"}</td>
+        <td>${next ? `${escapeHtml(next.title)}<br><span class="meta">${taskLabel(next)} · ${formatDue(next.due)}</span>` : "なし"}</td>
       </tr>
     `;
   }).join("");
@@ -341,10 +341,10 @@ function renderPeople() {
     const assigned = state.tasks.filter((task) => task.owner === member).length;
     return `
       <div class="member-row">
-        <input value="${escapeHtml(member)}" data-member-name="${index}" aria-label="成员名称">
-        <span class="tag">${assigned} 个事项</span>
+        <input value="${escapeHtml(member)}" data-member-name="${index}" aria-label="メンバー名">
+        <span class="tag">${assigned} 件</span>
         <button class="tiny-button" data-save-member="${index}" type="button">保存</button>
-        <button class="tiny-button" data-delete-member="${index}" type="button" ${assigned ? "disabled" : ""}>删除</button>
+        <button class="tiny-button" data-delete-member="${index}" type="button" ${assigned ? "disabled" : ""}>削除</button>
       </div>
     `;
   }).join("");
@@ -352,12 +352,12 @@ function renderPeople() {
   els.peopleView.innerHTML = `
     <div class="member-panel">
       <form id="memberForm" class="member-form">
-        <input id="newMemberName" maxlength="24" placeholder="新增成员姓名">
-        <button class="primary-button" type="submit">新增成员</button>
+        <input id="newMemberName" maxlength="24" placeholder="新しいメンバー名">
+        <button class="primary-button" type="submit">メンバー追加</button>
       </form>
       <div class="member-list">${memberRows}</div>
     </div>
-    <table class="list-table"><thead><tr><th>负责人</th><th>未完成</th><th>Issue</th><th>Todo</th><th>逾期</th><th>下一件事</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="list-table"><thead><tr><th>担当者</th><th>未完了</th><th>Issue</th><th>Todo</th><th>期限超過</th><th>次の対応</th></tr></thead><tbody>${rows}</tbody></table>
   `;
   wireMemberButtons();
 }
@@ -365,7 +365,7 @@ function renderPeople() {
 function taskSection(title, tasks) {
   return `
     <div class="section-title"><h3>${title}</h3><span class="tag">${tasks.length}</span></div>
-    <div class="cards">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">暂无事项</div>`}</div>
+    <div class="cards">${tasks.length ? tasks.map(taskCard).join("") : `<div class="empty">項目はありません</div>`}</div>
   `;
 }
 
@@ -384,10 +384,10 @@ function taskCard(task) {
         <span class="tag">${escapeHtml(task.status)}</span>
       </div>
       <div class="card-actions">
-        <button class="tiny-button" data-edit="${task.id}" type="button">编辑</button>
-        ${task.type === "todo" && task.status !== todoDoneStatus ? `<button class="tiny-button" data-convert="${task.id}" type="button">转 Issue</button>` : ""}
-        ${canAdvance && nextWorkflowStep(task.status) ? `<button class="tiny-button" data-advance="${task.id}" type="button">下一步</button>` : ""}
-        ${canFinish ? `<button class="tiny-button" data-done="${task.id}" type="button">完成</button>` : ""}
+        <button class="tiny-button" data-edit="${task.id}" type="button">編集</button>
+        ${task.type === "todo" && task.status !== todoDoneStatus ? `<button class="tiny-button" data-convert="${task.id}" type="button">Issue 化</button>` : ""}
+        ${canAdvance && nextWorkflowStep(task.status) ? `<button class="tiny-button" data-advance="${task.id}" type="button">次へ</button>` : ""}
+        ${canFinish ? `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>` : ""}
       </div>
     </article>
   `;
@@ -486,11 +486,11 @@ function wireMemberButtons() {
 function addWorkflowStep(rawName) {
   const name = normalizeName(rawName);
   if (!name) {
-    alert("请输入流程步骤名称。");
+    alert("フローステップ名を入力してください。");
     return;
   }
   if (state.workflow.includes(name) || name === completedStatus) {
-    alert("这个流程步骤已经存在。");
+    alert("このフローステップはすでに存在します。");
     return;
   }
   state.workflow.push(name);
@@ -501,13 +501,13 @@ function renameWorkflowStep(index, rawName) {
   const oldName = state.workflow[index];
   const newName = normalizeName(rawName);
   if (!oldName || !newName) {
-    alert("流程步骤不能为空。");
+    alert("フローステップ名は空にできません。");
     renderBoard();
     return;
   }
   if (oldName === newName) return;
   if (state.workflow.includes(newName) || newName === completedStatus) {
-    alert("这个流程步骤已经存在。");
+    alert("このフローステップはすでに存在します。");
     renderBoard();
     return;
   }
@@ -521,7 +521,7 @@ function deleteWorkflowStep(index) {
   if (!step || state.workflow.length <= 1) return;
   const used = state.tasks.some((task) => task.type === "issue" && task.status === step);
   if (used) {
-    alert("这个步骤还有 Issue，请先移动或完成这些 Issue。");
+    alert("このステップにはまだ Issue があります。先に移動または完了してください。");
     return;
   }
   state.workflow = state.workflow.filter((_, stepIndex) => stepIndex !== index);
@@ -534,10 +534,10 @@ function addTodosFromText(text) {
     .map((line) => line.trim())
     .filter(Boolean);
   if (!lines.length) {
-    alert("没有可加入的 Todo。");
+    alert("追加できる Todo がありません。");
     return;
   }
-  const todos = lines.map((line) => todoTask(line, state.members[0] || "我", todayOffset(1), "中", "确认是否需要推进、转 Issue 或归档。", "来自 memo/txt 快速录入。"));
+  const todos = lines.map((line) => todoTask(line, state.members[0] || "自分", todayOffset(1), "中", "対応するか、Issue 化するか、完了にするか確認する。", "memo/txt からのクイック登録。"));
   state.tasks = [...todos, ...state.tasks];
   render();
 }
@@ -545,11 +545,11 @@ function addTodosFromText(text) {
 function addMember(rawName) {
   const name = normalizeName(rawName);
   if (!name) {
-    alert("请输入成员姓名。");
+    alert("メンバー名を入力してください。");
     return;
   }
   if (state.members.includes(name)) {
-    alert("这个成员已经存在。");
+    alert("このメンバーはすでに存在します。");
     return;
   }
   state.members.push(name);
@@ -560,7 +560,7 @@ function renameMember(index, rawName) {
   const oldName = state.members[index];
   const newName = normalizeName(rawName);
   if (!oldName || !newName) {
-    alert("成员姓名不能为空。");
+    alert("メンバー名は空にできません。");
     renderPeople();
     return;
   }
@@ -584,7 +584,7 @@ function deleteMember(index) {
   if (!member) return;
   const assigned = state.tasks.some((task) => task.owner === member);
   if (assigned) {
-    alert("这个成员还有事项，请先编辑负责人再删除。");
+    alert("このメンバーにはまだ項目があります。先に担当者を変更してください。");
     return;
   }
   state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
@@ -598,11 +598,11 @@ function stat(label, value) {
 
 function switchView(view) {
   const titles = {
-    dashboard: "工作总览",
+    dashboard: "作業概要",
     board: "Issue 看板",
-    todo: "Todo 收件箱",
-    projects: "项目总览",
-    people: "成员跟进"
+    todo: "Todo 受信箱",
+    projects: "案件概要",
+    people: "メンバー管理"
   };
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   document.querySelectorAll(".view").forEach((section) => section.classList.remove("active"));
@@ -614,7 +614,7 @@ function openTaskDialog(id) {
   const task = id ? state.tasks.find((item) => item.id === id) : null;
   const defaultType = currentView() === "todo" ? "todo" : "issue";
   const type = task?.type || defaultType;
-  els.dialogTitle.textContent = task ? "编辑事项" : "新建事项";
+  els.dialogTitle.textContent = task ? "項目を編集" : "新規項目";
   els.deleteTaskBtn.hidden = !task;
   els.taskId.value = task?.id || "";
   els.taskType.value = type;
@@ -713,7 +713,7 @@ function importData(event) {
       dataFileHandle = null;
       render();
     } catch {
-      alert("导入失败，请选择由本工具导出的 JSON 文件。");
+      alert("インポートに失敗しました。TaskManager からエクスポートした JSON ファイルを選択してください。");
     }
   };
   reader.readAsText(file);
@@ -741,23 +741,35 @@ function saveState() {
 }
 
 function migrateState(rawState) {
+  const statusMap = {
+    "待确认": "調査中",
+    "待處理": "調査中",
+    "待处理": "調査中",
+    "调查": "調査中",
+    "調査": "調査中",
+    "进行中": "修正中",
+    "進行中": "修正中",
+    "修正": "修正中",
+    "等待反馈/阻塞": "テスト中",
+    "等待反饋/阻塞": "テスト中",
+    "测试": "テスト中",
+    "測試": "テスト中",
+    "テスト": "テスト中",
+    "本周完成": "完了",
+    "已完成": "完了",
+    "待办": "未対応",
+    "待辦": "未対応"
+  };
   const migrated = {
     members: Array.isArray(rawState?.members) ? rawState.members : defaultMembers,
-    workflow: Array.isArray(rawState?.workflow) && rawState.workflow.length ? rawState.workflow : defaultWorkflow,
+    workflow: Array.isArray(rawState?.workflow) && rawState.workflow.length ? rawState.workflow.map((step) => statusMap[step] || step) : defaultWorkflow,
     tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks
-  };
-  const oldStatusMap = {
-    "待确认": "调查",
-    "待处理": "调查",
-    "进行中": "修正",
-    "等待反馈/阻塞": "测试",
-    "本周完成": completedStatus
   };
 
   migrated.tasks = migrated.tasks.map((task) => {
     const type = task.type === "todo" ? "todo" : "issue";
     const fallbackStatus = type === "todo" ? todoOpenStatus : migrated.workflow[0];
-    const mappedStatus = oldStatusMap[task.status] || task.status || fallbackStatus;
+    const mappedStatus = statusMap[task.status] || task.status || fallbackStatus;
     const validIssueStatus = [...migrated.workflow, completedStatus].includes(mappedStatus);
     const validTodoStatus = [todoOpenStatus, todoDoneStatus].includes(mappedStatus);
     return {
@@ -765,11 +777,11 @@ function migrateState(rawState) {
       id: task.id || crypto.randomUUID(),
       type,
       project: task.project || (type === "todo" ? "Todo" : "Issue"),
-      owner: task.owner || migrated.members[0] || "我",
+      owner: task.owner || migrated.members[0] || "自分",
       due: task.due || todayOffset(3),
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
       priority: priorities.includes(task.priority) ? task.priority : "中",
-      next: task.next || "确认下一步动作。",
+      next: task.next || "次のアクションを確認する。",
       notes: task.notes || ""
     };
   });
@@ -791,7 +803,7 @@ function sortByUrgency(a, b) {
 
 function groupBy(items, key) {
   return items.reduce((acc, item) => {
-    const group = item[key] || "未归类";
+    const group = item[key] || "未分類";
     acc[group] = acc[group] || [];
     acc[group].push(item);
     return acc;
@@ -855,10 +867,10 @@ function daysUntil(dateString) {
 
 function formatDue(dateString) {
   const diff = daysUntil(dateString);
-  if (diff < 0) return `逾期 ${Math.abs(diff)} 天`;
-  if (diff === 0) return "今天到期";
-  if (diff === 1) return "明天到期";
-  return `${dateString} 到期`;
+  if (diff < 0) return `${Math.abs(diff)}日遅れ`;
+  if (diff === 0) return "本日締切";
+  if (diff === 1) return "明日締切";
+  return `${dateString} 期限`;
 }
 
 function todayOffset(days) {

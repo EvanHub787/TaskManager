@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,13 +18,13 @@
         </div>
         <div>
           <h1>TaskManager</h1>
-          <p>项目 / 进度 / 任务</p>
+          <p>プロジェクト / 進捗 / タスク</p>
         </div>
       </div>
 
-      <nav class="nav-tabs" aria-label="视图切换">
+      <nav class="nav-tabs" aria-label="ビュー切替">
         <button class="nav-button active" data-view="dashboard" type="button">
-          <span class="icon">◎</span>总览
+          <span class="icon">◎</span>概要
         </button>
         <button class="nav-button" data-view="board" type="button">
           <span class="icon">▦</span>Issue
@@ -33,15 +33,15 @@
           <span class="icon">□</span>Todo
         </button>
         <button class="nav-button" data-view="projects" type="button">
-          <span class="icon">≡</span>项目
+          <span class="icon">≡</span>案件
         </button>
         <button class="nav-button" data-view="people" type="button">
-          <span class="icon">◌</span>成员
+          <span class="icon">◌</span>メンバー
         </button>
       </nav>
 
       <div class="side-panel">
-        <div class="side-label">今日重点</div>
+        <div class="side-label">今日の重点</div>
         <div id="todayFocus" class="focus-list"></div>
       </div>
     </aside>
@@ -49,21 +49,21 @@
     <main class="workspace">
       <header class="topbar">
         <div>
-          <p class="eyebrow">团队 6 人适用</p>
-          <h2 id="pageTitle">工作总览</h2>
+          <p class="eyebrow">6人チーム向け</p>
+          <h2 id="pageTitle">作業概要</h2>
         </div>
         <div class="actions">
-          <button id="openDataFileBtn" class="secondary-button" type="button">打开数据文件</button>
-          <button id="saveDataFileBtn" class="secondary-button" type="button">保存到数据文件</button>
-          <button id="exportBtn" class="icon-button" type="button" title="导出数据" aria-label="导出数据">
+          <button id="openDataFileBtn" class="secondary-button" type="button">データファイルを開く</button>
+          <button id="saveDataFileBtn" class="secondary-button" type="button">データファイルへ保存</button>
+          <button id="exportBtn" class="icon-button" type="button" title="データをエクスポート" aria-label="データをエクスポート">
             <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"></path></svg>
           </button>
-          <label class="icon-button" title="导入数据" aria-label="导入数据">
+          <label class="icon-button" title="データをインポート" aria-label="データをインポート">
             <input id="importFile" type="file" accept="application/json">
             <svg viewBox="0 0 24 24"><path d="M12 21V9m0 0 4 4m-4-4-4 4M4 7V4h16v3"></path></svg>
           </label>
           <button id="addTaskBtn" class="primary-button" type="button">
-            <span>＋</span>新任务
+            <span>＋</span>新規
           </button>
         </div>
       </header>
@@ -71,16 +71,16 @@
       <section class="filters">
         <div class="search-box">
           <svg viewBox="0 0 24 24"><path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"></path></svg>
-          <input id="searchInput" type="search" placeholder="搜索任务、项目、负责人、下一步">
+          <input id="searchInput" type="search" placeholder="タスク、案件、担当者、次のアクションを検索">
         </div>
-        <select id="ownerFilter" aria-label="负责人筛选"></select>
-        <select id="priorityFilter" aria-label="优先级筛选">
-          <option value="all">全部优先级</option>
-          <option value="高">高优先级</option>
-          <option value="中">中优先级</option>
-          <option value="低">低优先级</option>
+        <select id="ownerFilter" aria-label="担当者フィルター"></select>
+        <select id="priorityFilter" aria-label="優先度フィルター">
+          <option value="all">すべての優先度</option>
+          <option value="高">高優先度</option>
+          <option value="中">中優先度</option>
+          <option value="低">低優先度</option>
         </select>
-        <button id="resetFilters" class="ghost-button" type="button">清除筛选</button>
+        <button id="resetFilters" class="ghost-button" type="button">フィルター解除</button>
       </section>
 
       <section id="dashboardView" class="view active"></section>
@@ -94,27 +94,27 @@
   <dialog id="taskDialog">
     <form id="taskForm" method="dialog">
       <div class="dialog-header">
-        <h3 id="dialogTitle">新建任务</h3>
-        <button class="icon-button plain" value="cancel" type="button" id="closeDialog" aria-label="关闭">
+        <h3 id="dialogTitle">新規タスク</h3>
+        <button class="icon-button plain" value="cancel" type="button" id="closeDialog" aria-label="閉じる">
           <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg>
         </button>
       </div>
       <input id="taskId" type="hidden">
       <div class="form-grid">
-        <label>类型<select id="taskType" required></select></label>
-        <label>任务名称<input id="taskTitle" required maxlength="80"></label>
-        <label>所属项目<input id="taskProject" list="projectList" required maxlength="60"></label>
-        <label>负责人<select id="taskOwner" required></select></label>
-        <label>截止日期<input id="taskDue" type="date" required></label>
-        <label>状态<select id="taskStatus" required></select></label>
-        <label>优先级<select id="taskPriority" required></select></label>
+        <label>種別<select id="taskType" required></select></label>
+        <label>タスク名<input id="taskTitle" required maxlength="80"></label>
+        <label>案件<input id="taskProject" list="projectList" required maxlength="60"></label>
+        <label>担当者<select id="taskOwner" required></select></label>
+        <label>期限<input id="taskDue" type="date" required></label>
+        <label>ステータス<select id="taskStatus" required></select></label>
+        <label>優先度<select id="taskPriority" required></select></label>
       </div>
-      <label class="full-label">下一步动作<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
-      <label class="full-label">备注 / 链接<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
+      <label class="full-label">次のアクション<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
+      <label class="full-label">メモ / リンク<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
       <div class="dialog-actions">
-        <button id="deleteTaskBtn" class="danger-button" type="button">删除</button>
+        <button id="deleteTaskBtn" class="danger-button" type="button">削除</button>
         <span class="spacer"></span>
-        <button class="ghost-button" type="button" id="cancelDialog">取消</button>
+        <button class="ghost-button" type="button" id="cancelDialog">キャンセル</button>
         <button class="primary-button" value="default" type="submit">保存</button>
       </div>
     </form>
