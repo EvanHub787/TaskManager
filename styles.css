@@ -139,10 +139,16 @@ svg {
   min-height: 0;
   max-height: 46vh;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   margin-top: auto;
   border-top: 1px solid #34463b;
   padding-top: 18px;
   padding-right: 4px;
+}
+
+.side-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .side-label {
