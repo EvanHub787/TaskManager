@@ -982,12 +982,29 @@ function updateTask(id, patch) {
 
 function filteredTasks() {
   return state.tasks.filter((task) => {
-    const haystack = `${task.type} ${task.title} ${task.project} ${task.owner} ${task.status} ${task.priority} ${task.next} ${task.notes}`.toLowerCase();
+    const haystack = searchableTaskText(task);
     const matchSearch = !filters.search || haystack.includes(filters.search);
     const matchOwner = filters.owner === "all" || task.owner === filters.owner;
     const matchPriority = filters.priority === "all" || task.priority === filters.priority;
     return matchSearch && matchOwner && matchPriority;
   });
+}
+
+function searchableTaskText(task) {
+  const issueNumber = extractIssueNumber(task.link);
+  return [
+    task.type,
+    task.title,
+    task.project,
+    task.owner,
+    task.status,
+    task.priority,
+    task.next,
+    task.notes,
+    task.link,
+    issueNumber,
+    issueNumber ? `#${issueNumber}` : ""
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 function syncMembersFromTasks() {
