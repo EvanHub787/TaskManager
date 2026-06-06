@@ -111,6 +111,7 @@ function bindEvents() {
   els.exportBtn.addEventListener("click", exportData);
   els.importFile.addEventListener("change", importData);
   els.taskType.addEventListener("change", () => fillStatusSelect(els.taskType.value));
+  els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
 }
@@ -966,6 +967,13 @@ function saveTask(event) {
 
   closeTaskDialog();
   render();
+}
+
+function submitTaskDialogWithShortcut(event) {
+  if (event.key !== "Enter" || !event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  if (!(event.target instanceof HTMLElement) || !event.target.closest("input, textarea, select")) return;
+  event.preventDefault();
+  els.form.requestSubmit();
 }
 
 function deleteCurrentTask() {
