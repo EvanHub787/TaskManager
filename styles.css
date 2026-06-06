@@ -672,10 +672,15 @@ textarea {
   gap: 10px;
 }
 
-.member-list,
-.workflow-list {
+.member-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.workflow-list {
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -689,6 +694,46 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #f8faf8;
+}
+
+.workflow-row {
+  grid-template-columns: auto minmax(120px, 1fr) auto auto auto;
+}
+
+.workflow-row[draggable="true"] {
+  cursor: grab;
+}
+
+.workflow-row.dragging {
+  cursor: grabbing;
+  opacity: .45;
+}
+
+.workflow-drag-handle {
+  display: inline-grid;
+  width: 28px;
+  height: 32px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: grab;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.workflow-row.dragging .workflow-drag-handle {
+  cursor: grabbing;
+}
+
+.workflow-drop-placeholder {
+  display: grid;
+  place-items: center;
+  border: 2px dashed rgba(18, 113, 91, .45);
+  border-radius: 8px;
+  background: rgba(18, 113, 91, .08);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .todo-capture form {
@@ -851,8 +896,7 @@ label {
 
   .filters,
   .stats-grid,
-  .member-list,
-  .workflow-list {
+  .member-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

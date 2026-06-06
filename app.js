@@ -18,6 +18,8 @@ let dataFileHandle = null;
 let dragPlaceholderHeight = 96;
 let activeDropZone = null;
 let activeBeforeId = "";
+let keepWorkflowMenuOpen = false;
+let workflowDragPlaceholderHeight = 52;
 let filters = {
   search: "",
   owner: "all",
@@ -260,11 +262,12 @@ function renderBoard() {
 function renderWorkflowTopControl() {
   if (currentView() !== "board") {
     els.workflowTopSlot.innerHTML = "";
+    keepWorkflowMenuOpen = false;
     return;
   }
 
   els.workflowTopSlot.innerHTML = `
-    <details class="action-menu workflow-top-menu">
+    <details class="action-menu workflow-top-menu"${keepWorkflowMenuOpen ? " open" : ""}>
       <summary class="secondary-button">フロー編集</summary>
       <div class="action-menu-content workflow-menu-content">
         <form id="workflowForm" class="workflow-form">
@@ -283,7 +286,8 @@ function renderWorkflowTopControl() {
 function workflowStepRow(step, index) {
   const used = state.tasks.some((task) => task.type === "issue" && task.status === step);
   return `
-    <div class="workflow-row">
+    <div class="workflow-row" draggable="true" data-workflow-index="${index}">
+      <span class="workflow-drag-handle" aria-hidden="true">↕</span>
       <input value="${escapeHtml(step)}" data-step-name="${index}" aria-label="フローステップ名">
       <span class="tag">${used ? "使用中" : "未使用"}</span>
       <button class="tiny-button" data-save-step="${index}" type="button">保存</button>
@@ -595,6 +599,7 @@ function clearDropIndicators() {
 function wireWorkflowButtons() {
   const form = els.workflowTopSlot.querySelector("#workflowForm");
   if (!form) return;
+  const workflowList = els.workflowTopSlot.querySelector(".workflow-list");
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const input = els.workflowTopSlot.querySelector("#newStepName");
@@ -611,6 +616,55 @@ function wireWorkflowButtons() {
 
   els.workflowTopSlot.querySelectorAll("[data-delete-step]").forEach((button) => {
     button.addEventListener("click", () => deleteWorkflowStep(Number(button.dataset.deleteStep)));
+  });
+
+  workflowList.querySelectorAll(".workflow-row[draggable='true']").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest("input, button")) {
+        event.preventDefault();
+        return;
+      }
+      const index = row.dataset.workflowIndex;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-workflow-index", index);
+      event.dataTransfer.setData("text/plain", index);
+      workflowDragPlaceholderHeight = Math.max(48, Math.round(row.getBoundingClientRect().height));
+      row.classList.add("dragging");
+    });
+
+    row.addEventListener("dragend", () => clearWorkflowDropIndicators());
+
+    row.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const draggingIndex = workflowList.querySelector(".workflow-row.dragging")?.dataset.workflowIndex;
+      if (draggingIndex && draggingIndex !== row.dataset.workflowIndex) {
+        showWorkflowDropPlaceholder(workflowList, row);
+      }
+    });
+
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const fromIndex = workflowDragIndex(event);
+      if (fromIndex === null || fromIndex === Number(row.dataset.workflowIndex)) return;
+      moveWorkflowStep(fromIndex, Number(row.dataset.workflowIndex));
+    });
+  });
+
+  workflowList.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.target.closest(".workflow-drop-placeholder")) return;
+    if (!event.target.closest(".workflow-row")) {
+      showWorkflowDropPlaceholder(workflowList, null);
+    }
+  });
+
+  workflowList.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const fromIndex = workflowDragIndex(event);
+    if (fromIndex === null || event.target.closest(".workflow-row")) return;
+    const placeholder = workflowList.querySelector(".workflow-drop-placeholder");
+    const beforeIndex = placeholder?.nextElementSibling?.dataset.workflowIndex;
+    moveWorkflowStep(fromIndex, beforeIndex === undefined ? state.workflow.length : Number(beforeIndex));
   });
 }
 
@@ -665,6 +719,7 @@ function addWorkflowStep(rawName) {
     return;
   }
   state.workflow.push(name);
+  keepWorkflowMenuOpen = true;
   render();
 }
 
@@ -684,6 +739,7 @@ function renameWorkflowStep(index, rawName) {
   }
   state.workflow[index] = newName;
   state.tasks = state.tasks.map((task) => task.type === "issue" && task.status === oldName ? { ...task, status: newName } : task);
+  keepWorkflowMenuOpen = true;
   render();
 }
 
@@ -696,7 +752,53 @@ function deleteWorkflowStep(index) {
     return;
   }
   state.workflow = state.workflow.filter((_, stepIndex) => stepIndex !== index);
+  keepWorkflowMenuOpen = true;
   render();
+}
+
+function moveWorkflowStep(fromIndex, beforeIndex) {
+  if (fromIndex < 0 || fromIndex >= state.workflow.length) return;
+  if (beforeIndex < 0 || beforeIndex > state.workflow.length) return;
+  if (fromIndex === beforeIndex || fromIndex + 1 === beforeIndex) return;
+
+  const workflow = [...state.workflow];
+  const [movedStep] = workflow.splice(fromIndex, 1);
+  const insertIndex = fromIndex < beforeIndex ? beforeIndex - 1 : beforeIndex;
+  workflow.splice(insertIndex, 0, movedStep);
+  state.workflow = workflow;
+  keepWorkflowMenuOpen = true;
+  render();
+}
+
+function workflowDragIndex(event) {
+  const rawIndex = event.dataTransfer.getData("application/x-workflow-index") || event.dataTransfer.getData("text/plain");
+  const index = Number(rawIndex);
+  return Number.isInteger(index) ? index : null;
+}
+
+function showWorkflowDropPlaceholder(workflowList, beforeRow) {
+  const placeholder = getWorkflowDropPlaceholder();
+  placeholder.style.minHeight = `${workflowDragPlaceholderHeight}px`;
+  if (beforeRow && beforeRow.parentElement === workflowList) {
+    workflowList.insertBefore(placeholder, beforeRow);
+  } else if (placeholder.parentElement !== workflowList || placeholder.nextElementSibling) {
+    workflowList.appendChild(placeholder);
+  }
+}
+
+function getWorkflowDropPlaceholder() {
+  let placeholder = els.workflowTopSlot.querySelector(".workflow-drop-placeholder");
+  if (!placeholder) {
+    placeholder = document.createElement("div");
+    placeholder.className = "workflow-drop-placeholder";
+    placeholder.textContent = "ここに移動";
+  }
+  return placeholder;
+}
+
+function clearWorkflowDropIndicators() {
+  els.workflowTopSlot.querySelectorAll(".workflow-row.dragging").forEach((row) => row.classList.remove("dragging"));
+  els.workflowTopSlot.querySelector(".workflow-drop-placeholder")?.remove();
 }
 
 function addTodosFromText(text) {
