@@ -943,6 +943,13 @@ function saveTask(event) {
   const id = els.taskId.value || crypto.randomUUID();
   const type = els.taskType.value;
   const existingTask = state.tasks.find((item) => item.id === id);
+  const link = normalizeUrl(els.taskLink.value);
+
+  if (type === "issue" && link && hasDuplicateIssueLink(id, link)) {
+    alert("同じ Issue URL はすでに存在します。保存できません。");
+    return;
+  }
+
   const task = {
     id,
     type,
@@ -953,7 +960,7 @@ function saveTask(event) {
     status: els.taskStatus.value,
     priority: els.taskPriority.value,
     next: els.taskNext.value.trim(),
-    link: normalizeUrl(els.taskLink.value),
+    link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
     notes: els.taskNotes.value.trim()
   };
@@ -967,6 +974,14 @@ function saveTask(event) {
 
   closeTaskDialog();
   render();
+}
+
+function hasDuplicateIssueLink(taskId, link) {
+  return state.tasks.some((task) => (
+    task.type === "issue"
+    && task.id !== taskId
+    && normalizeUrl(task.link) === link
+  ));
 }
 
 function submitTaskDialogWithShortcut(event) {
