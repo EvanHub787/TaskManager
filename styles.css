@@ -48,7 +48,7 @@ button {
   position: sticky;
   top: 0;
   height: 100vh;
-  overflow-y: auto;
+  overflow: hidden;
   background: #17231d;
   color: #f3f8f4;
   padding: 24px;
@@ -61,6 +61,7 @@ button {
 }
 
 .brand {
+  flex: 0 0 auto;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -104,6 +105,7 @@ svg {
 }
 
 .nav-tabs {
+  flex: 0 0 auto;
   display: grid;
   gap: 8px;
 }
@@ -134,9 +136,13 @@ svg {
 }
 
 .side-panel {
+  min-height: 0;
+  max-height: 46vh;
+  overflow-y: auto;
   margin-top: auto;
   border-top: 1px solid #34463b;
   padding-top: 18px;
+  padding-right: 4px;
 }
 
 .side-label {
