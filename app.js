@@ -18,6 +18,7 @@ let dataFileHandle = null;
 let dragPlaceholderHeight = 96;
 let activeDropZone = null;
 let activeBeforeId = "";
+let suppressBoardClickUntil = 0;
 let keepWorkflowMenuOpen = false;
 let workflowDragPlaceholderHeight = 52;
 let filters = {
@@ -111,6 +112,7 @@ function bindEvents() {
   els.importFile.addEventListener("change", importData);
   els.taskType.addEventListener("change", () => fillStatusSelect(els.taskType.value));
   els.form.addEventListener("submit", saveTask);
+  els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
 }
 
 function fillStaticSelects() {
@@ -280,6 +282,10 @@ function renderWorkflowTopControl() {
       </div>
     </details>
   `;
+  const workflowMenu = els.workflowTopSlot.querySelector(".workflow-top-menu");
+  workflowMenu.addEventListener("toggle", () => {
+    keepWorkflowMenuOpen = workflowMenu.open;
+  });
   wireWorkflowButtons();
 }
 
@@ -461,6 +467,10 @@ function wireTaskButtons(root) {
 function wireBoardDragAndDrop() {
   els.boardView.querySelectorAll(".task-card[draggable='true']").forEach((card) => {
     card.addEventListener("dragstart", (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest("a, button, input, select, textarea")) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", card.dataset.taskId);
       dragPlaceholderHeight = Math.max(72, Math.round(card.getBoundingClientRect().height));
@@ -469,6 +479,7 @@ function wireBoardDragAndDrop() {
 
     card.addEventListener("dragend", () => {
       card.classList.remove("dragging");
+      suppressNextBoardClick();
       clearDropIndicators();
     });
 
@@ -485,6 +496,7 @@ function wireBoardDragAndDrop() {
       const draggedId = event.dataTransfer.getData("text/plain");
       if (!draggedId || draggedId === card.dataset.taskId) return;
       const targetStatus = card.closest("[data-drop-status]")?.dataset.dropStatus;
+      suppressNextBoardClick();
       moveIssueTask(draggedId, targetStatus, card.dataset.taskId);
     });
   });
@@ -513,9 +525,21 @@ function wireBoardDragAndDrop() {
       if (!draggedId || cardTarget) return;
       const placeholder = dropZone.querySelector(".drop-placeholder");
       const beforeId = placeholder?.nextElementSibling?.dataset.taskId || "";
+      suppressNextBoardClick();
       moveIssueTask(draggedId, dropZone.dataset.dropStatus, beforeId);
     });
   });
+}
+
+function suppressNextBoardClick() {
+  suppressBoardClickUntil = Date.now() + 250;
+}
+
+function suppressBoardClickAfterDrag(event) {
+  if (Date.now() <= suppressBoardClickUntil) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
 }
 
 function showDropPlaceholder(dropZone, beforeCard) {
