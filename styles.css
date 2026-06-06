@@ -500,8 +500,15 @@ textarea {
   opacity: .45;
 }
 
-.task-card.drop-before {
-  box-shadow: 0 -4px 0 var(--accent), 0 8px 18px rgba(27, 42, 35, .05);
+.drop-placeholder {
+  display: grid;
+  place-items: center;
+  border: 2px dashed rgba(18, 113, 91, .45);
+  border-radius: 8px;
+  background: rgba(18, 113, 91, .08);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .task-card.overdue {

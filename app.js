@@ -15,6 +15,9 @@ const sampleTasks = [
 
 let state = migrateState(loadState());
 let dataFileHandle = null;
+let dragPlaceholderHeight = 96;
+let activeDropZone = null;
+let activeBeforeId = "";
 let filters = {
   search: "",
   owner: "all",
@@ -456,6 +459,7 @@ function wireBoardDragAndDrop() {
     card.addEventListener("dragstart", (event) => {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", card.dataset.taskId);
+      dragPlaceholderHeight = Math.max(72, Math.round(card.getBoundingClientRect().height));
       card.classList.add("dragging");
     });
 
@@ -466,14 +470,10 @@ function wireBoardDragAndDrop() {
 
     card.addEventListener("dragover", (event) => {
       event.preventDefault();
-      const draggingId = event.dataTransfer.getData("text/plain");
+      const draggingId = els.boardView.querySelector(".task-card.dragging")?.dataset.taskId;
       if (draggingId && draggingId !== card.dataset.taskId) {
-        card.classList.add("drop-before");
+        showDropPlaceholder(card.closest("[data-drop-status]"), card);
       }
-    });
-
-    card.addEventListener("dragleave", () => {
-      card.classList.remove("drop-before");
     });
 
     card.addEventListener("drop", (event) => {
@@ -489,6 +489,11 @@ function wireBoardDragAndDrop() {
     dropZone.addEventListener("dragover", (event) => {
       event.preventDefault();
       dropZone.classList.add("drop-active");
+      if (isPointerOverPlaceholder(event)) return;
+      if (event.target.closest(".drop-placeholder")) return;
+      if (!event.target.closest(".task-card")) {
+        showDropPlaceholder(dropZone, null);
+      }
     });
 
     dropZone.addEventListener("dragleave", (event) => {
@@ -502,9 +507,47 @@ function wireBoardDragAndDrop() {
       const draggedId = event.dataTransfer.getData("text/plain");
       const cardTarget = event.target.closest(".task-card");
       if (!draggedId || cardTarget) return;
-      moveIssueTask(draggedId, dropZone.dataset.dropStatus, "");
+      const placeholder = dropZone.querySelector(".drop-placeholder");
+      const beforeId = placeholder?.nextElementSibling?.dataset.taskId || "";
+      moveIssueTask(draggedId, dropZone.dataset.dropStatus, beforeId);
     });
   });
+}
+
+function showDropPlaceholder(dropZone, beforeCard) {
+  if (!dropZone) return;
+  const beforeId = beforeCard?.dataset.taskId || "";
+  if (activeDropZone === dropZone && activeBeforeId === beforeId) return;
+
+  const placeholder = getDropPlaceholder();
+  placeholder.style.minHeight = `${dragPlaceholderHeight}px`;
+  if (beforeCard && beforeCard.parentElement === dropZone) {
+    dropZone.insertBefore(placeholder, beforeCard);
+  } else if (placeholder.parentElement !== dropZone || placeholder.nextElementSibling) {
+    dropZone.appendChild(placeholder);
+  }
+  activeDropZone = dropZone;
+  activeBeforeId = beforeId;
+}
+
+function getDropPlaceholder() {
+  let placeholder = els.boardView.querySelector(".drop-placeholder");
+  if (!placeholder) {
+    placeholder = document.createElement("div");
+    placeholder.className = "drop-placeholder";
+    placeholder.textContent = "ここに移動";
+  }
+  return placeholder;
+}
+
+function isPointerOverPlaceholder(event) {
+  const placeholder = els.boardView.querySelector(".drop-placeholder");
+  if (!placeholder) return false;
+  const rect = placeholder.getBoundingClientRect();
+  return event.clientX >= rect.left
+    && event.clientX <= rect.right
+    && event.clientY >= rect.top
+    && event.clientY <= rect.bottom;
 }
 
 function moveIssueTask(taskId, targetStatus, beforeId) {
@@ -544,7 +587,9 @@ function reindexIssueStatus(status) {
 
 function clearDropIndicators() {
   els.boardView.querySelectorAll(".drop-active").forEach((element) => element.classList.remove("drop-active"));
-  els.boardView.querySelectorAll(".drop-before").forEach((element) => element.classList.remove("drop-before"));
+  els.boardView.querySelector(".drop-placeholder")?.remove();
+  activeDropZone = null;
+  activeBeforeId = "";
 }
 
 function wireWorkflowButtons() {
