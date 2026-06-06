@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="ja">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +8,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <div class="app-shell">
     <aside class="sidebar">
@@ -19,7 +21,7 @@
         </div>
         <div>
           <h1>TaskManager</h1>
-          <p>プロジェクト / 進捗 / タスク</p>
+          <p>CEMenu-T</p>
         </div>
       </div>
 
@@ -38,7 +40,11 @@
         </button>
         <button class="nav-button" data-view="people" type="button">
           <span class="icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="9.5" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            <svg viewBox="0 0 24 24">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9.5" cy="7" r="4"></circle>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
           </span>メンバー
         </button>
       </nav>
@@ -52,7 +58,6 @@
     <main class="workspace">
       <header class="topbar">
         <div>
-          <p class="eyebrow">6人チーム向け</p>
           <h2 id="pageTitle">作業概要</h2>
         </div>
         <div class="actions">
@@ -77,7 +82,9 @@
 
       <section class="filters">
         <div class="search-box">
-          <svg viewBox="0 0 24 24"><path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"></path></svg>
+          <svg viewBox="0 0 24 24">
+            <path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"></path>
+          </svg>
           <input id="searchInput" type="search" placeholder="タスク、案件、担当者、次のアクションを検索">
         </div>
         <select id="ownerFilter" aria-label="担当者フィルター"></select>
@@ -103,7 +110,9 @@
       <div class="dialog-header">
         <h3 id="dialogTitle">新規タスク</h3>
         <button class="icon-button plain" value="cancel" type="button" id="closeDialog" aria-label="閉じる">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+          <svg viewBox="0 0 24 24">
+            <path d="M6 6l12 12M18 6 6 18"></path>
+          </svg>
         </button>
       </div>
       <input id="taskId" type="hidden">
@@ -117,7 +126,8 @@
         <label>優先度<select id="taskPriority" required></select></label>
       </div>
       <label class="full-label">次のアクション<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
-      <label class="full-label">Issue URL<input id="taskLink" inputmode="url" maxlength="300" placeholder="https://example.com/issues/123"></label>
+      <label class="full-label">Issue URL<input id="taskLink" inputmode="url" maxlength="300"
+          placeholder="https://example.com/issues/123"></label>
       <label class="full-label">メモ<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
       <div class="dialog-actions">
         <button id="deleteTaskBtn" class="danger-button" type="button">削除</button>
@@ -131,4 +141,5 @@
   <datalist id="projectList"></datalist>
   <script src="app.js"></script>
 </body>
+
 </html>
