@@ -107,21 +107,23 @@ svg {
 .nav-tabs {
   flex: 0 0 auto;
   display: grid;
-  gap: 8px;
+  gap: 2px;
 }
 
 .nav-button {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: #dce8df;
   text-align: left;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .nav-button.active,
@@ -131,7 +133,7 @@ svg {
 }
 
 .icon {
-  width: 20px;
+  width: 18px;
   text-align: center;
 }
 
@@ -586,6 +588,11 @@ textarea {
 
 .due-text.overdue {
   color: var(--danger);
+  font-weight: 700;
+}
+
+.due-text.soon {
+  color: var(--warn);
   font-weight: 700;
 }
 

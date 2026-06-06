@@ -1250,7 +1250,12 @@ function formatDue(dateString) {
 }
 
 function dueText(task) {
-  const className = daysUntil(task.due) < 0 && !isDone(task) ? "due-text overdue" : "due-text";
+  const diff = daysUntil(task.due);
+  const className = !isDone(task) && diff < 0
+    ? "due-text overdue"
+    : !isDone(task) && diff <= 1
+      ? "due-text soon"
+      : "due-text";
   return `<span class="${className}">${escapeHtml(formatDue(task.due))}</span>`;
 }
 
