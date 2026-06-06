@@ -219,7 +219,7 @@ function renderTodayFocus() {
     .slice(0, 4);
 
   els.todayFocus.innerHTML = focusTasks.length
-    ? focusTasks.map((task) => `<div class="focus-item"><strong>${escapeHtml(task.title)}</strong><span>${taskLabel(task)} · ${escapeHtml(task.owner)} · ${formatDue(task.due)}</span></div>`).join("")
+    ? focusTasks.map((task) => `<div class="focus-item"><strong>${escapeHtml(task.title)}</strong><span>${taskLabel(task)} · ${escapeHtml(task.owner)} · ${dueText(task)}</span></div>`).join("")
     : `<div class="focus-item">フォロー対象はありません</div>`;
 }
 
@@ -419,7 +419,7 @@ function taskCard(task, enableDrag = false) {
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <h4>${issueBadge}${title}</h4>
-      <div class="meta">${taskLabel(task)} · ${escapeHtml(task.project)} · ${escapeHtml(task.owner)} · ${formatDue(task.due)}</div>
+      <div class="meta">${taskLabel(task)} · ${escapeHtml(task.project)} · ${escapeHtml(task.owner)} · ${dueText(task)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
@@ -1247,6 +1247,11 @@ function formatDue(dateString) {
   if (diff === 0) return "本日締切";
   if (diff === 1) return "明日締切";
   return `${dateString} 期限`;
+}
+
+function dueText(task) {
+  const className = daysUntil(task.due) < 0 && !isDone(task) ? "due-text overdue" : "due-text";
+  return `<span class="${className}">${escapeHtml(formatDue(task.due))}</span>`;
 }
 
 function todayOffset(days) {

@@ -584,6 +584,11 @@ textarea {
   margin-bottom: 8px;
 }
 
+.due-text.overdue {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .tag {
   min-height: 24px;
   display: inline-flex;
