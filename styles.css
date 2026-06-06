@@ -520,6 +520,10 @@ textarea {
 }
 
 .task-card h4 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
   margin: 0 0 8px;
   font-size: 15px;
 }
@@ -532,6 +536,26 @@ textarea {
 .task-link:hover {
   color: var(--accent);
   text-decoration: underline;
+}
+
+.issue-number {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid #cfe0d4;
+  border-radius: 999px;
+  background: #f4faf6;
+  color: #2f6c45;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.issue-number:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .meta,

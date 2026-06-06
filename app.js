@@ -407,12 +407,17 @@ function taskCard(task, enableDrag = false) {
   const priorityClass = task.priority === "高" ? "high" : task.priority === "中" ? "middle" : "low";
   const canAdvance = task.type === "issue" && task.status !== completedStatus;
   const canFinish = !isDone(task);
+  const issueNumber = extractIssueNumber(task.link);
+  const taskUrl = normalizeUrl(task.link);
+  const issueBadge = issueNumber
+    ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    : "";
   const title = task.link
-    ? `<a class="task-link" href="${escapeHtml(normalizeUrl(task.link))}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.title)}</a>`
+    ? `<a class="task-link" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.title)}</a>`
     : escapeHtml(task.title);
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
-      <h4>${title}</h4>
+      <h4>${issueBadge}${title}</h4>
       <div class="meta">${taskLabel(task)} · ${escapeHtml(task.project)} · ${escapeHtml(task.owner)} · ${formatDue(task.due)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
@@ -1148,6 +1153,11 @@ function normalizeUrl(value) {
 function extractUrl(value) {
   const match = String(value || "").match(/https?:\/\/[^\s]+/i);
   return match ? match[0] : "";
+}
+
+function extractIssueNumber(value) {
+  const match = normalizeUrl(value).match(/\/issues\/(\d+)(?:[/?#]|$)/i);
+  return match ? match[1] : "";
 }
 
 function issueTask(title, project, owner, due, status, priority, next, notes) {
