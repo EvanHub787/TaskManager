@@ -448,7 +448,7 @@ function taskCard(task, enableDrag = false) {
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
         <h4>${issueBadge}${title}</h4>
-        <span class="owner-name">${escapeHtml(task.owner)}</span>
+        <button class="owner-name" data-owner-filter="${escapeHtml(task.owner)}" type="button">${escapeHtml(task.owner)}</button>
       </div>
       <div class="meta"><span>${escapeHtml(task.project)}</span>${dueText(task)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
@@ -472,6 +472,13 @@ function wireTaskButtons(root) {
   });
   root.querySelectorAll("[data-title-edit]").forEach((button) => {
     button.addEventListener("click", () => openTaskDialog(button.dataset.titleEdit));
+  });
+  root.querySelectorAll("[data-owner-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      filterTasksByMember(button.dataset.ownerFilter, currentView());
+    });
   });
   root.querySelectorAll("[data-advance]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -941,13 +948,12 @@ function deleteMember(index) {
   render();
 }
 
-function filterTasksByMember(member) {
+function filterTasksByMember(member, targetView = "dashboard") {
   filters.owner = member;
   dashboardStatFilter = "";
-  els.searchInput.value = filters.search;
-  els.ownerFilter.value = member;
-  els.priorityFilter.value = filters.priority;
-  switchView("dashboard");
+  pendingDoneTaskId = "";
+  pendingConvertTaskId = "";
+  switchView(targetView);
   render();
 }
 

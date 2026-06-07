@@ -584,12 +584,22 @@ textarea {
 }
 
 .owner-name {
+  appearance: none;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.6;
   text-align: right;
+}
+
+.owner-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .task-title-button {
