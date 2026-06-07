@@ -56,46 +56,72 @@
     </aside>
 
     <main class="workspace">
-      <header class="topbar">
-        <div>
-          <h2 id="pageTitle">作業概要</h2>
-        </div>
-        <div class="actions">
-          <div id="workflowTopSlot"></div>
-          <details class="action-menu">
-            <summary class="secondary-button">データ管理</summary>
-            <div class="action-menu-content">
-              <button id="openDataFileBtn" class="secondary-button" type="button">データファイルを開く</button>
-              <button id="saveDataFileBtn" class="secondary-button" type="button">データファイルへ保存</button>
-              <button id="exportBtn" class="secondary-button" type="button">エクスポート</button>
-              <label class="secondary-button file-button">
-                インポート
-                <input id="importFile" type="file" accept="application/json">
+      <div class="workspace-head">
+        <header class="topbar">
+          <div>
+            <h2 id="pageTitle">作業概要</h2>
+          </div>
+          <div class="actions">
+            <div id="workflowTopSlot"></div>
+            <details class="action-menu">
+              <summary class="secondary-button">データ管理</summary>
+              <div class="action-menu-content">
+                <button id="openDataFileBtn" class="menu-item" type="button">
+                  <span>開く</span>
+                  <small>データファイルを開く</small>
+                </button>
+                <button id="saveDataFileBtn" class="menu-item" type="button">
+                  <span>保存</span>
+                  <small>データファイルへ保存</small>
+                </button>
+                <button id="exportBtn" class="menu-item" type="button">
+                  <span>エクスポート</span>
+                  <small>JSON を書き出す</small>
+                </button>
+                <label class="menu-item file-button">
+                  <span>インポート</span>
+                  <small>JSON から読み込む</small>
+                  <input id="importFile" type="file" accept="application/json">
+                </label>
+              </div>
+            </details>
+            <button id="addTaskBtn" class="primary-button" type="button">
+              <span>＋</span>新規
+            </button>
+          </div>
+        </header>
+
+        <section class="filters">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24">
+              <path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"></path>
+            </svg>
+            <input id="searchInput" type="search" placeholder="タスク、案件、担当者、次のアクションを検索">
+          </div>
+          <details class="action-menu filter-menu">
+            <summary class="secondary-button">フィルター</summary>
+            <div class="action-menu-content filter-menu-content">
+              <label>
+                <span>担当者</span>
+                <select id="ownerFilter" aria-label="担当者フィルター"></select>
               </label>
+              <label>
+                <span>優先度</span>
+                <select id="priorityFilter" aria-label="優先度フィルター">
+                  <option value="all">すべての優先度</option>
+                  <option value="高">高優先度</option>
+                  <option value="中">中優先度</option>
+                  <option value="低">低優先度</option>
+                </select>
+              </label>
+              <button id="resetFilters" class="menu-item reset-menu-item" type="button">
+                <span>フィルター解除</span>
+                <small>検索条件をリセット</small>
+              </button>
             </div>
           </details>
-          <button id="addTaskBtn" class="primary-button" type="button">
-            <span>＋</span>新規
-          </button>
-        </div>
-      </header>
-
-      <section class="filters">
-        <div class="search-box">
-          <svg viewBox="0 0 24 24">
-            <path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"></path>
-          </svg>
-          <input id="searchInput" type="search" placeholder="タスク、案件、担当者、次のアクションを検索">
-        </div>
-        <select id="ownerFilter" aria-label="担当者フィルター"></select>
-        <select id="priorityFilter" aria-label="優先度フィルター">
-          <option value="all">すべての優先度</option>
-          <option value="高">高優先度</option>
-          <option value="中">中優先度</option>
-          <option value="低">低優先度</option>
-        </select>
-        <button id="resetFilters" class="ghost-button" type="button">フィルター解除</button>
-      </section>
+        </section>
+      </div>
 
       <section id="dashboardView" class="view active"></section>
       <section id="boardView" class="view"></section>

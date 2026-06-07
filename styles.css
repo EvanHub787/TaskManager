@@ -182,8 +182,15 @@ svg {
   overflow: hidden;
   padding: 24px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  row-gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 16px;
+}
+
+.workspace-head {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
 .topbar {
@@ -202,6 +209,7 @@ svg {
 
 .topbar h2 {
   font-size: 28px;
+  line-height: 1.2;
 }
 
 .actions {
@@ -246,9 +254,9 @@ svg {
   right: 0;
   z-index: 5;
   display: grid;
-  gap: 8px;
+  gap: 2px;
   min-width: 220px;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -263,14 +271,6 @@ svg {
 
 .action-menu:not([open]) .action-menu-content {
   display: none;
-}
-
-.action-menu-content .secondary-button,
-.file-button {
-  width: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .primary-button,
@@ -328,9 +328,6 @@ svg {
 
 .file-button {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   cursor: pointer;
 }
 
@@ -347,12 +344,68 @@ svg {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 180px 160px auto;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: center;
   gap: 10px;
   margin-bottom: 0;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
-  box-shadow: 0 10px 18px rgba(27, 42, 35, .04);
+}
+
+.filter-menu {
+  justify-self: end;
+}
+
+.filter-menu-content {
+  width: 280px;
+}
+
+.filter-menu-content label {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.filter-menu-content select {
+  width: 100%;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.menu-item {
+  width: 100%;
+  min-height: 50px;
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: var(--soft);
+}
+
+.menu-item span {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.menu-item small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.reset-menu-item {
+  margin-top: 4px;
+  color: var(--accent);
 }
 
 .search-box {
@@ -1018,14 +1071,13 @@ label {
     display: block;
   }
 
-  .topbar,
-  .filters {
+  .workspace-head {
     margin-bottom: 18px;
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 
   .filters {
-    padding-bottom: 0;
-    border-bottom: 0;
     box-shadow: none;
   }
 
@@ -1063,6 +1115,7 @@ label {
 
   .topbar {
     flex-direction: column;
+    gap: 12px;
   }
 
   .actions {
