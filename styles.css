@@ -139,11 +139,11 @@ svg {
 
 .side-panel {
   min-height: 0;
-  max-height: 46vh;
+  max-height: min(56vh, 520px);
   overflow-y: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  margin-top: auto;
+  margin-top: 12px;
   border-top: 1px solid #34463b;
   padding-top: 18px;
   padding-right: 4px;
@@ -407,17 +407,35 @@ textarea {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(190px, 1fr);
   gap: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   margin-bottom: 18px;
 }
 
+.stats-grid::-webkit-scrollbar {
+  display: none;
+}
+
 .stat {
+  display: block;
+  width: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 16px;
   box-shadow: 0 8px 18px rgba(27, 42, 35, .04);
+  color: var(--ink);
+  text-align: left;
+}
+
+.stat:hover,
+.stat.active {
+  border-color: var(--accent);
+  background: var(--soft);
 }
 
 .stat span {
@@ -436,6 +454,20 @@ textarea {
   align-items: center;
   justify-content: space-between;
   margin: 22px 0 10px;
+}
+
+.section-link {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.section-link:hover {
+  text-decoration: underline;
 }
 
 .section-title h3 {
@@ -533,21 +565,47 @@ textarea {
   border-left-color: var(--warn);
 }
 
+.card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+
 .task-card h4 {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 15px;
 }
 
-.task-link {
+.owner-name {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: right;
+}
+
+.task-title-button {
+  appearance: none;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
   text-decoration: none;
 }
 
-.task-link:hover {
+.task-title-button:hover {
   color: var(--accent);
   text-decoration: underline;
 }
@@ -580,10 +638,20 @@ textarea {
   align-items: center;
 }
 
+.tag-spacer {
+  flex: 1 1 auto;
+}
+
 .meta {
+  justify-content: space-between;
   color: var(--muted);
   font-size: 12px;
   margin-bottom: 8px;
+}
+
+.meta .due-text {
+  margin-left: auto;
+  text-align: right;
 }
 
 .due-text.overdue {
@@ -647,6 +715,13 @@ textarea {
 .tiny-button:disabled {
   cursor: not-allowed;
   opacity: .45;
+}
+
+.tiny-button.confirm-button {
+  border-color: #f0b8ae;
+  background: #fff1ee;
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .member-panel,
@@ -818,6 +893,22 @@ textarea {
   background: #eef3ef;
   color: #405247;
   font-size: 12px;
+}
+
+.table-link {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+
+.table-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .progress {
