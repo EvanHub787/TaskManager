@@ -230,14 +230,26 @@ function renderTodayFocus() {
     .sort(sortByTodo);
 
   els.todayFocus.innerHTML = focusTasks.length
-    ? focusTasks.map((task) => `
-      <button class="focus-item" data-focus-task="${task.id}" type="button">
-        <strong>${escapeHtml(task.title)}</strong>
-        <span>${taskLabel(task)} · ${escapeHtml(task.owner)} · ${dueText(task)}</span>
-      </button>
-    `).join("")
+    ? focusTasks.map((task) => focusItem(task)).join("")
     : `<div class="focus-item">フォロー対象はありません</div>`;
   wireTodayFocus();
+}
+
+function focusItem(task) {
+  const issueNumber = extractIssueNumber(task.link);
+  const taskUrl = normalizeUrl(task.link);
+  const issueLink = issueNumber
+    ? `<a class="focus-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    : "";
+  return `
+    <div class="focus-item">
+      ${issueLink}
+      <button class="focus-item-body" data-focus-task="${task.id}" type="button">
+        <strong>${escapeHtml(task.title)}</strong>
+        <em>${escapeHtml(task.next)}</em>
+      </button>
+    </div>
+  `;
 }
 
 function wireTodayFocus() {

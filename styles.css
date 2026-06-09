@@ -180,9 +180,46 @@ svg {
   background: #273a30;
 }
 
-.focus-item strong {
+.focus-item-body {
+  width: 100%;
+  min-height: auto;
   display: block;
-  margin-bottom: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.focus-item-body strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.focus-issue-number {
+  display: inline-flex;
+  width: fit-content;
+  color: #8ee0b1;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.focus-issue-number:hover {
+  color: #b9f5cf;
+  text-decoration: underline;
+}
+
+.focus-item-body em {
+  display: -webkit-box;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #c8d6ce;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .workspace {
