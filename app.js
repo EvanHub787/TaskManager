@@ -60,7 +60,7 @@ const els = {
   taskDue: document.querySelector("#taskDue"),
   taskStatus: document.querySelector("#taskStatus"),
   taskPriority: document.querySelector("#taskPriority"),
-  taskTodayPlan: document.querySelector("#taskTodayPlan"),
+  taskTodoPlan: document.querySelector("#taskTodoPlan"),
   taskNext: document.querySelector("#taskNext"),
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
@@ -119,6 +119,7 @@ function bindEvents() {
   els.taskType.addEventListener("change", () => {
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
+    syncTodoPlanControl();
   });
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
@@ -225,13 +226,9 @@ function renderProjectList() {
 }
 
 function renderTodayFocus() {
-  const plannedTasks = state.tasks
-    .filter((task) => !isDone(task) && task.todayPlan)
-    .sort(sortByTodayPlan);
-  const focusTasks = (plannedTasks.length ? plannedTasks : state.tasks
-    .filter((task) => !isDone(task))
-    .sort(sortByUrgency)
-    .slice(0, 4));
+  const focusTasks = state.tasks
+    .filter((task) => !isDone(task) && isTodoItem(task))
+    .sort(sortByTodo);
 
   els.todayFocus.innerHTML = focusTasks.length
     ? focusTasks.map((task) => `
@@ -255,12 +252,11 @@ function renderDashboard() {
   const openTasks = visible.filter((task) => !isDone(task));
   const overdue = openTasks.filter((task) => daysUntil(task.due) < 0);
   const issues = openTasks.filter((task) => task.type === "issue");
-  const todos = openTasks.filter((task) => task.type === "todo");
-  const todayPlanTasks = openTasks.filter((task) => task.todayPlan).sort(sortByTodayPlan);
+  const todos = openTasks.filter(isTodoItem);
   const statItems = [
     { key: "open", label: "未完了", tasks: openTasks },
     { key: "issue", label: "対応中 Issue", tasks: issues },
-    { key: "todo", label: "未対応 Todo", tasks: todos },
+    { key: "todo", label: "Todo", tasks: todos },
     { key: "overdue", label: "期限超過", tasks: overdue },
     { key: "done", label: "完了", tasks: visible.filter(isDone) }
   ];
@@ -274,7 +270,6 @@ function renderDashboard() {
     ${selectedStat
       ? taskSection(`${selectedStat.label} の結果`, selectedTasks)
       : `
-        ${todayPlanTasks.length ? taskSection("本日の予定", todayPlanTasks) : ""}
         ${taskSection("優先対応", openTasks.sort(sortByUrgency).slice(0, 8))}
         ${taskSection("最近の完了", visible.filter(isDone).slice(0, 8), `<button class="section-link" data-section-filter="done" type="button">すべての完了を見る &gt;</button>`)}
       `}
@@ -345,27 +340,14 @@ function workflowStepRow(step, index) {
 }
 
 function renderTodo() {
-  const todos = filteredTasks().filter((task) => task.type === "todo");
-  const open = todos.filter((task) => task.status !== todoDoneStatus).sort(sortByUrgency);
-  const done = todos.filter((task) => task.status === todoDoneStatus).sort(sortByUrgency);
+  const todos = filteredTasks().filter(isTodoItem);
+  const open = todos.filter((task) => !isDone(task)).sort(sortByTodo);
+  const done = todos.filter(isDone).sort(sortByTodo);
 
   els.todoView.innerHTML = `
-    <details class="todo-capture collapsible-panel">
-      <summary>Todo memo 追加</summary>
-      <div class="collapsible-body">
-        <form id="todoForm">
-          <textarea id="todoMemo" rows="5" placeholder="txt の一時メモをここに貼り付けます。1行ごとに Todo として登録されます"></textarea>
-          <div class="todo-actions">
-            <input id="todoTxtFile" type="file" accept=".txt,text/plain">
-            <button class="primary-button" type="submit">Todo に追加</button>
-          </div>
-        </form>
-      </div>
-    </details>
-    ${taskSection("未対応 Todo", open)}
+    ${taskSection("本日の Todo", open)}
     ${taskSection("完了 Todo", done)}
   `;
-  wireTodoButtons();
   wireTaskButtons(els.todoView);
 }
 
@@ -398,7 +380,7 @@ function renderPeople() {
     const open = tasks.filter((task) => !isDone(task));
     const overdue = open.filter((task) => daysUntil(task.due) < 0);
     const issues = open.filter((task) => task.type === "issue");
-    const todos = open.filter((task) => task.type === "todo");
+    const todos = open.filter(isTodoItem);
     return `
       <tr>
         <td><button class="table-link" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button></td>
@@ -459,18 +441,17 @@ function taskCard(task, enableDrag = false) {
   const convertButton = pendingConvertTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-convert="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-convert="${task.id}" type="button">Issue 化</button>`;
+  const todoToggleButton = task.type === "issue" && !isDone(task)
+    ? `<button class="tiny-button" data-toggle-todo="${task.id}" type="button">${task.todoPlan ? "Todo解除" : "Todo追加"}</button>`
+    : "";
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
-  const todayPlanIcon = task.todayPlan && !isDone(task)
-    ? `<span class="today-plan-icon" title="本日対応予定" aria-label="本日対応予定"></span>`
-    : "";
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
         <h4>${issueBadge}${title}</h4>
         <div class="card-side">
-          ${todayPlanIcon}
           <button class="owner-name" data-owner-filter="${escapeHtml(task.owner)}" type="button">${escapeHtml(task.owner)}</button>
         </div>
       </div>
@@ -481,6 +462,7 @@ function taskCard(task, enableDrag = false) {
         <span class="tag">${escapeHtml(task.status)}</span>
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
+        ${todoToggleButton}
         ${canFinish ? doneButton : ""}
       </div>
     </article>
@@ -539,6 +521,14 @@ function wireTaskButtons(root) {
       }
       pendingConvertTaskId = "";
       openTaskDialog(task.id, { type: "issue", status: state.workflow[0], project: "Issue" });
+    });
+  });
+  root.querySelectorAll("[data-toggle-todo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const task = state.tasks.find((item) => item.id === button.dataset.toggleTodo);
+      if (!task || task.type !== "issue") return;
+      updateTask(task.id, { todoPlan: !task.todoPlan });
+      render();
     });
   });
 }
@@ -771,25 +761,6 @@ function wireWorkflowButtons() {
   });
 }
 
-function wireTodoButtons() {
-  const form = els.todoView.querySelector("#todoForm");
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const textarea = els.todoView.querySelector("#todoMemo");
-    addTodosFromText(textarea.value);
-    textarea.value = "";
-  });
-
-  els.todoView.querySelector("#todoTxtFile").addEventListener("change", (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => addTodosFromText(reader.result);
-    reader.readAsText(file);
-    event.target.value = "";
-  });
-}
-
 function wireMemberButtons() {
   const form = els.peopleView.querySelector("#memberForm");
   form.addEventListener("submit", (event) => {
@@ -908,20 +879,6 @@ function clearWorkflowDropIndicators() {
   els.workflowTopSlot.querySelector(".workflow-drop-placeholder")?.remove();
 }
 
-function addTodosFromText(text) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (!lines.length) {
-    alert("追加できる Todo がありません。");
-    return;
-  }
-  const todos = lines.map((line) => todoTask(line, state.members[0] || "自分", todayOffset(1), "中", "対応するか、Issue 化するか、完了にするか確認する。", "memo/txt からのクイック登録。"));
-  state.tasks = [...todos, ...state.tasks];
-  render();
-}
-
 function addMember(rawName) {
   const name = normalizeName(rawName);
   if (!name) {
@@ -1008,7 +965,7 @@ function switchView(view) {
   const titles = {
     dashboard: "作業概要",
     board: "Issue 看板",
-    todo: "Todo 受信箱",
+    todo: "Todo",
     projects: "案件概要",
     people: "メンバー管理"
   };
@@ -1033,11 +990,13 @@ function openTaskDialog(id, overrides = {}) {
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
   els.taskDue.value = overrides.due || task?.due || todayOffset(3);
   els.taskPriority.value = overrides.priority || task?.priority || "中";
-  els.taskTodayPlan.checked = Boolean(overrides.todayPlan ?? task?.todayPlan);
+  els.taskTodoPlan.checked = type === "todo" || Boolean(overrides.todoPlan ?? task?.todoPlan);
+  els.taskTodoPlan.disabled = type === "todo";
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
   syncIssueLinkRequirement();
+  syncTodoPlanControl();
   els.dialog.showModal();
 }
 
@@ -1074,7 +1033,7 @@ function saveTask(event) {
     due: els.taskDue.value,
     status: els.taskStatus.value,
     priority: els.taskPriority.value,
-    todayPlan: els.taskTodayPlan.checked,
+    todoPlan: type === "todo" ? false : els.taskTodoPlan.checked,
     next: els.taskNext.value.trim(),
     link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
@@ -1122,6 +1081,12 @@ function syncIssueLinkRequirement() {
   els.taskLink.placeholder = isIssue ? "https://example.com/issues/123" : "任意: https://example.com/issues/123";
 }
 
+function syncTodoPlanControl() {
+  const isTodo = els.taskType.value === "todo";
+  if (isTodo) els.taskTodoPlan.checked = true;
+  els.taskTodoPlan.disabled = isTodo;
+}
+
 function submitTaskDialogWithShortcut(event) {
   if (event.key !== "Enter" || !event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   if (!(event.target instanceof HTMLElement) || !event.target.closest("input, textarea, select")) return;
@@ -1165,7 +1130,7 @@ function searchableTaskText(task) {
     task.link,
     issueNumber,
     issueNumber ? `#${issueNumber}` : "",
-    task.todayPlan ? "本日予定 本日対応予定" : ""
+    isTodoItem(task) ? "todo todo事項" : ""
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -1267,7 +1232,8 @@ function migrateState(rawState) {
       due: task.due || todayOffset(3),
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
       priority: priorities.includes(task.priority) ? task.priority : "中",
-      todayPlan: Boolean(task.todayPlan),
+      todoPlan: type === "todo" ? false : Boolean(task.todoPlan || task.todayPlan),
+      todayPlan: undefined,
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       order: Number.isFinite(task.order) ? task.order : index,
@@ -1290,7 +1256,7 @@ function sortByUrgency(a, b) {
     || typeWeight(a) - typeWeight(b);
 }
 
-function sortByTodayPlan(a, b) {
+function sortByTodo(a, b) {
   const priorityWeight = { 高: -3, 中: -2, 低: -1 };
   const typeWeight = (task) => task.type === "issue" ? -1 : 0;
   return daysUntil(a.due) - daysUntil(b.due)
@@ -1320,6 +1286,10 @@ function currentView() {
 
 function isDone(task) {
   return task.type === "todo" ? task.status === todoDoneStatus : task.status === completedStatus;
+}
+
+function isTodoItem(task) {
+  return task.type === "todo" || Boolean(task.todoPlan);
 }
 
 function nextWorkflowStep(status) {
