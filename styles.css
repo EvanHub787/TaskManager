@@ -645,6 +645,45 @@ textarea {
   font-size: 15px;
 }
 
+.card-side {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 42%;
+}
+
+.today-plan-icon {
+  position: relative;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--danger);
+}
+
+.today-plan-icon::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 2px;
+  width: 2px;
+  height: 13px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.today-plan-icon::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 10px;
+  height: 8px;
+  border-radius: 2px 2px 2px 0;
+  background: currentColor;
+  box-shadow: 0 0 0 2px rgba(180, 35, 24, .10);
+}
+
 .owner-name {
   appearance: none;
   min-height: auto;
@@ -657,6 +696,7 @@ textarea {
   font-weight: 700;
   line-height: 1.6;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .owner-name:hover {
@@ -755,11 +795,6 @@ textarea {
 .tag.middle {
   background: #fff4d6;
   color: #815b00;
-}
-
-.plan-tag {
-  background: #dff3ff;
-  color: #14607d;
 }
 
 .tag.low {

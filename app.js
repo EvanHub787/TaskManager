@@ -462,18 +462,23 @@ function taskCard(task, enableDrag = false) {
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
+  const todayPlanIcon = task.todayPlan && !isDone(task)
+    ? `<span class="today-plan-icon" title="本日対応予定" aria-label="本日対応予定"></span>`
+    : "";
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
         <h4>${issueBadge}${title}</h4>
-        <button class="owner-name" data-owner-filter="${escapeHtml(task.owner)}" type="button">${escapeHtml(task.owner)}</button>
+        <div class="card-side">
+          ${todayPlanIcon}
+          <button class="owner-name" data-owner-filter="${escapeHtml(task.owner)}" type="button">${escapeHtml(task.owner)}</button>
+        </div>
       </div>
       <div class="meta"><span>${escapeHtml(task.project)}</span>${dueText(task)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
         <span class="tag">${escapeHtml(task.status)}</span>
-        ${task.todayPlan && !isDone(task) ? `<span class="tag plan-tag">本日予定</span>` : ""}
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
         ${canFinish ? doneButton : ""}
