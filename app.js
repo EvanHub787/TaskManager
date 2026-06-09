@@ -29,6 +29,7 @@ let filters = {
 let dashboardStatFilter = "";
 let pendingDoneTaskId = "";
 let pendingConvertTaskId = "";
+let showAllTodoDone = false;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -353,12 +354,20 @@ function workflowStepRow(step, index) {
 function renderTodo() {
   const todos = filteredTasks().filter((task) => task.type === "todo");
   const open = todos.filter((task) => !isDone(task)).sort(sortByTodo);
-  const done = todos.filter(isDone).sort(sortByTodo);
+  const done = todos.filter(isDone).sort(sortByCompletedAt);
+  const todayDone = done.filter((task) => completionDate(task) === todayOffset(0));
+  const recentDone = done.filter((task) => {
+    const days = daysSince(completionDate(task));
+    return days >= 0 && days < 7;
+  });
 
   els.todoView.innerHTML = `
-    ${taskSection("本日の Todo", open)}
-    ${taskSection("完了 Todo", done)}
+    ${todoSection("To-do List", open)}
+    ${showAllTodoDone
+      ? todoDoneHistorySection("完了", recentDone)
+      : todoSection("完了", todayDone, `<button class="section-link" data-todo-done-view="all" type="button">すべての完了を見る &gt;</button>`)}
   `;
+  wireTodoDoneViewButtons();
   wireTaskButtons(els.todoView);
 }
 
@@ -435,6 +444,57 @@ function taskSection(title, tasks, action = `<span class="tag">${tasks.length}</
   return `
     <div class="section-title"><h3>${title}</h3>${action}</div>
     <div class="cards">${tasks.length ? tasks.map((task) => taskCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
+  `;
+}
+
+function todoSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`) {
+  return `
+    <div class="section-title compact-section-title"><h3>${title}</h3>${action}</div>
+    <div class="todo-list">${tasks.length ? tasks.map((task) => todoCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
+  `;
+}
+
+function todoDoneHistorySection(title, tasks) {
+  const groups = groupDoneTasksByDate(tasks);
+  return `
+    <div class="section-title compact-section-title"><h3>${title}</h3><button class="section-link" data-todo-done-view="today" type="button">今日の完了だけ見る</button></div>
+    <div class="todo-done-history">
+      ${groups.length ? groups.map(([date, dateTasks]) => `
+        <section class="todo-done-day">
+          <div class="todo-done-day-title"><h4>${escapeHtml(formatDoneDate(date))}</h4><span class="tag">${dateTasks.length}</span></div>
+          <div class="todo-list">${dateTasks.map((task) => todoCard(task)).join("")}</div>
+        </section>
+      `).join("") : `<div class="empty">7日内の完了はありません</div>`}
+    </div>
+  `;
+}
+
+function todoCard(task) {
+  const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
+  const issueNumber = extractIssueNumber(task.link);
+  const taskUrl = normalizeUrl(task.link);
+  const issueBadge = issueNumber
+    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    : "";
+  const doneButton = !isDone(task)
+    ? (pendingDoneTaskId === task.id
+      ? `<button class="todo-check confirm" data-done="${task.id}" type="button" aria-label="完了を確認"></button>`
+      : `<button class="todo-check" data-done="${task.id}" type="button" aria-label="完了"></button>`)
+    : `<span class="todo-check done" aria-label="完了済み"></span>`;
+  return `
+    <article class="todo-card ${urgencyClass}" data-task-id="${task.id}">
+      ${doneButton}
+      <div class="todo-card-main">
+        <div class="todo-title-row">
+          ${issueBadge}
+          <button class="todo-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>
+        </div>
+        <div class="todo-detail-row">
+          <p>${escapeHtml(task.next)}</p>
+          <span>${escapeHtml(task.project)}</span>
+        </div>
+      </div>
+    </article>
   `;
 }
 
@@ -516,7 +576,10 @@ function wireTaskButtons(root) {
         return;
       }
       pendingDoneTaskId = "";
-      updateTask(task.id, { status: task.type === "todo" ? todoDoneStatus : completedStatus });
+      updateTask(task.id, {
+        status: task.type === "todo" ? todoDoneStatus : completedStatus,
+        completedAt: todayOffset(0)
+      });
       render();
     });
   });
@@ -971,6 +1034,15 @@ function wireDashboardSectionFilters() {
   });
 }
 
+function wireTodoDoneViewButtons() {
+  els.todoView.querySelectorAll("[data-todo-done-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      showAllTodoDone = button.dataset.todoDoneView === "all";
+      renderTodo();
+    });
+  });
+}
+
 function switchView(view) {
   const titles = {
     dashboard: "作業概要",
@@ -1035,6 +1107,10 @@ function saveTask(event) {
   const type = els.taskType.value;
   const existingTask = state.tasks.find((item) => item.id === id);
   const link = normalizeUrl(els.taskLink.value);
+  const status = els.taskStatus.value;
+  const completedAt = status === (type === "todo" ? todoDoneStatus : completedStatus)
+    ? existingTask?.completedAt || todayOffset(0)
+    : "";
 
   if (type === "issue" && !extractIssueNumber(link)) {
     els.taskLink.setCustomValidity("Issue URL には Issue 番号を含めてください。");
@@ -1055,9 +1131,10 @@ function saveTask(event) {
     project: els.taskProject.value.trim() || (type === "todo" ? "Todo" : "Issue"),
     owner: els.taskOwner.value,
     due: els.taskDue.value,
-    status: els.taskStatus.value,
+    status,
     priority: els.taskPriority.value,
     linkedIssueId: type === "todo" ? els.taskLinkedIssueId.value : "",
+    completedAt,
     next: els.taskNext.value.trim(),
     link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
@@ -1255,6 +1332,7 @@ function migrateState(rawState) {
       todayPlan: undefined,
       legacyTodoPlan,
       linkedIssueId: type === "todo" ? task.linkedIssueId || "" : "",
+      completedAt: [todoDoneStatus, completedStatus].includes(mappedStatus) ? task.completedAt || task.due || todayOffset(0) : "",
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       order: Number.isFinite(task.order) ? task.order : index,
@@ -1277,6 +1355,7 @@ function migrateState(rawState) {
       next: "この Issue を調査する。",
       link: issue.link,
       linkedIssueId: issue.id,
+      completedAt: "",
       order: Date.now(),
       notes: `関連 Issue: ${issue.title}`
     }));
@@ -1309,6 +1388,10 @@ function sortByTodo(a, b) {
     || a.title.localeCompare(b.title, "ja");
 }
 
+function sortByCompletedAt(a, b) {
+  return completionDate(b).localeCompare(completionDate(a)) || sortByTodo(a, b);
+}
+
 function sortByBoardOrder(a, b) {
   const orderA = Number.isFinite(a.order) ? a.order : 0;
   const orderB = Number.isFinite(b.order) ? b.order : 0;
@@ -1317,11 +1400,16 @@ function sortByBoardOrder(a, b) {
 
 function groupBy(items, key) {
   return items.reduce((acc, item) => {
-    const group = item[key] || "未分類";
+    const group = (typeof key === "function" ? key(item) : item[key]) || "未分類";
     acc[group] = acc[group] || [];
     acc[group].push(item);
     return acc;
   }, {});
+}
+
+function groupDoneTasksByDate(tasks) {
+  const groups = groupBy(tasks, (task) => completionDate(task));
+  return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
 }
 
 function currentView() {
@@ -1406,6 +1494,24 @@ function formatDue(dateString) {
   if (diff === 0) return "本日締切";
   if (diff === 1) return "明日締切";
   return `${dateString} 期限`;
+}
+
+function completionDate(task) {
+  return task.completedAt || task.due || todayOffset(0);
+}
+
+function daysSince(dateString) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const date = new Date(`${dateString}T00:00:00`);
+  return Math.round((today - date) / 86400000);
+}
+
+function formatDoneDate(dateString) {
+  const diff = daysSince(dateString);
+  if (diff === 0) return "今日";
+  if (diff === 1) return "昨日";
+  return `${dateString}`;
 }
 
 function dueText(task) {
