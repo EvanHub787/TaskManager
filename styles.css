@@ -165,10 +165,19 @@ svg {
 }
 
 .focus-item {
+  width: 100%;
   padding: 10px;
+  border: 1px solid transparent;
   border-radius: 8px;
   background: #223128;
+  color: #f3f8f4;
   font-size: 13px;
+  text-align: left;
+}
+
+.focus-item:hover {
+  border-color: #49685a;
+  background: #273a30;
 }
 
 .focus-item strong {
@@ -748,6 +757,11 @@ textarea {
   color: #815b00;
 }
 
+.plan-tag {
+  background: #dff3ff;
+  color: #14607d;
+}
+
 .tag.low {
   background: #e7f2ff;
   color: #1d5b88;
@@ -1037,6 +1051,21 @@ label {
   gap: 6px;
   color: #405247;
   font-size: 13px;
+}
+
+.check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.check-label input {
+  width: 18px;
+  min-height: 18px;
 }
 
 .full-label {

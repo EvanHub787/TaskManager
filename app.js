@@ -60,6 +60,7 @@ const els = {
   taskDue: document.querySelector("#taskDue"),
   taskStatus: document.querySelector("#taskStatus"),
   taskPriority: document.querySelector("#taskPriority"),
+  taskTodayPlan: document.querySelector("#taskTodayPlan"),
   taskNext: document.querySelector("#taskNext"),
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
@@ -224,14 +225,29 @@ function renderProjectList() {
 }
 
 function renderTodayFocus() {
-  const focusTasks = state.tasks
+  const plannedTasks = state.tasks
+    .filter((task) => !isDone(task) && task.todayPlan)
+    .sort(sortByTodayPlan);
+  const focusTasks = (plannedTasks.length ? plannedTasks : state.tasks
     .filter((task) => !isDone(task))
     .sort(sortByUrgency)
-    .slice(0, 4);
+    .slice(0, 4));
 
   els.todayFocus.innerHTML = focusTasks.length
-    ? focusTasks.map((task) => `<div class="focus-item"><strong>${escapeHtml(task.title)}</strong><span>${taskLabel(task)} · ${escapeHtml(task.owner)} · ${dueText(task)}</span></div>`).join("")
+    ? focusTasks.map((task) => `
+      <button class="focus-item" data-focus-task="${task.id}" type="button">
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>${taskLabel(task)} · ${escapeHtml(task.owner)} · ${dueText(task)}</span>
+      </button>
+    `).join("")
     : `<div class="focus-item">フォロー対象はありません</div>`;
+  wireTodayFocus();
+}
+
+function wireTodayFocus() {
+  els.todayFocus.querySelectorAll("[data-focus-task]").forEach((button) => {
+    button.addEventListener("click", () => openTaskDialog(button.dataset.focusTask));
+  });
 }
 
 function renderDashboard() {
@@ -240,6 +256,7 @@ function renderDashboard() {
   const overdue = openTasks.filter((task) => daysUntil(task.due) < 0);
   const issues = openTasks.filter((task) => task.type === "issue");
   const todos = openTasks.filter((task) => task.type === "todo");
+  const todayPlanTasks = openTasks.filter((task) => task.todayPlan).sort(sortByTodayPlan);
   const statItems = [
     { key: "open", label: "未完了", tasks: openTasks },
     { key: "issue", label: "対応中 Issue", tasks: issues },
@@ -257,6 +274,7 @@ function renderDashboard() {
     ${selectedStat
       ? taskSection(`${selectedStat.label} の結果`, selectedTasks)
       : `
+        ${todayPlanTasks.length ? taskSection("本日の予定", todayPlanTasks) : ""}
         ${taskSection("優先対応", openTasks.sort(sortByUrgency).slice(0, 8))}
         ${taskSection("最近の完了", visible.filter(isDone).slice(0, 8), `<button class="section-link" data-section-filter="done" type="button">すべての完了を見る &gt;</button>`)}
       `}
@@ -455,6 +473,7 @@ function taskCard(task, enableDrag = false) {
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
         <span class="tag">${escapeHtml(task.status)}</span>
+        ${task.todayPlan && !isDone(task) ? `<span class="tag plan-tag">本日予定</span>` : ""}
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
         ${canFinish ? doneButton : ""}
@@ -1009,6 +1028,7 @@ function openTaskDialog(id, overrides = {}) {
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
   els.taskDue.value = overrides.due || task?.due || todayOffset(3);
   els.taskPriority.value = overrides.priority || task?.priority || "中";
+  els.taskTodayPlan.checked = Boolean(overrides.todayPlan ?? task?.todayPlan);
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
@@ -1049,6 +1069,7 @@ function saveTask(event) {
     due: els.taskDue.value,
     status: els.taskStatus.value,
     priority: els.taskPriority.value,
+    todayPlan: els.taskTodayPlan.checked,
     next: els.taskNext.value.trim(),
     link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
@@ -1138,7 +1159,8 @@ function searchableTaskText(task) {
     task.notes,
     task.link,
     issueNumber,
-    issueNumber ? `#${issueNumber}` : ""
+    issueNumber ? `#${issueNumber}` : "",
+    task.todayPlan ? "本日予定 本日対応予定" : ""
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -1240,6 +1262,7 @@ function migrateState(rawState) {
       due: task.due || todayOffset(3),
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
       priority: priorities.includes(task.priority) ? task.priority : "中",
+      todayPlan: Boolean(task.todayPlan),
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       order: Number.isFinite(task.order) ? task.order : index,
@@ -1260,6 +1283,15 @@ function sortByUrgency(a, b) {
     || daysUntil(a.due) - daysUntil(b.due)
     || priorityWeight[a.priority] - priorityWeight[b.priority]
     || typeWeight(a) - typeWeight(b);
+}
+
+function sortByTodayPlan(a, b) {
+  const priorityWeight = { 高: -3, 中: -2, 低: -1 };
+  const typeWeight = (task) => task.type === "issue" ? -1 : 0;
+  return daysUntil(a.due) - daysUntil(b.due)
+    || priorityWeight[a.priority] - priorityWeight[b.priority]
+    || typeWeight(a) - typeWeight(b)
+    || a.title.localeCompare(b.title, "ja");
 }
 
 function sortByBoardOrder(a, b) {
