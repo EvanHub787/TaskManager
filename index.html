@@ -151,7 +151,7 @@
         <label>ステータス<select id="taskStatus" required></select></label>
         <label>優先度<select id="taskPriority" required></select></label>
       </div>
-      <label class="check-label"><input id="taskTodoPlan" type="checkbox">Todo に表示</label>
+      <input id="taskLinkedIssueId" type="hidden">
       <label class="full-label">次のアクション<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
       <label class="full-label">Issue URL / Issue 番号<input id="taskLink" inputmode="url" maxlength="300"
           placeholder="https://example.com/issues/123"></label>

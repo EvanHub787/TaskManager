@@ -1044,21 +1044,6 @@ label {
   font-size: 13px;
 }
 
-.check-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  margin: 0 0 12px;
-  color: var(--ink);
-  font-weight: 700;
-}
-
-.check-label input {
-  width: 18px;
-  min-height: 18px;
-}
-
 .full-label {
   margin-bottom: 12px;
 }

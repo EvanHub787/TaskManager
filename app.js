@@ -60,7 +60,7 @@ const els = {
   taskDue: document.querySelector("#taskDue"),
   taskStatus: document.querySelector("#taskStatus"),
   taskPriority: document.querySelector("#taskPriority"),
-  taskTodoPlan: document.querySelector("#taskTodoPlan"),
+  taskLinkedIssueId: document.querySelector("#taskLinkedIssueId"),
   taskNext: document.querySelector("#taskNext"),
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
@@ -119,7 +119,6 @@ function bindEvents() {
   els.taskType.addEventListener("change", () => {
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
-    syncTodoPlanControl();
   });
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
@@ -227,7 +226,7 @@ function renderProjectList() {
 
 function renderTodayFocus() {
   const focusTasks = state.tasks
-    .filter((task) => !isDone(task) && isTodoItem(task))
+    .filter((task) => task.type === "todo" && !isDone(task))
     .sort(sortByTodo);
 
   els.todayFocus.innerHTML = focusTasks.length
@@ -252,7 +251,7 @@ function renderDashboard() {
   const openTasks = visible.filter((task) => !isDone(task));
   const overdue = openTasks.filter((task) => daysUntil(task.due) < 0);
   const issues = openTasks.filter((task) => task.type === "issue");
-  const todos = openTasks.filter(isTodoItem);
+  const todos = openTasks.filter((task) => task.type === "todo");
   const statItems = [
     { key: "open", label: "未完了", tasks: openTasks },
     { key: "issue", label: "対応中 Issue", tasks: issues },
@@ -340,7 +339,7 @@ function workflowStepRow(step, index) {
 }
 
 function renderTodo() {
-  const todos = filteredTasks().filter(isTodoItem);
+  const todos = filteredTasks().filter((task) => task.type === "todo");
   const open = todos.filter((task) => !isDone(task)).sort(sortByTodo);
   const done = todos.filter(isDone).sort(sortByTodo);
 
@@ -380,7 +379,7 @@ function renderPeople() {
     const open = tasks.filter((task) => !isDone(task));
     const overdue = open.filter((task) => daysUntil(task.due) < 0);
     const issues = open.filter((task) => task.type === "issue");
-    const todos = open.filter(isTodoItem);
+    const todos = open.filter((task) => task.type === "todo");
     return `
       <tr>
         <td><button class="table-link" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button></td>
@@ -437,12 +436,12 @@ function taskCard(task, enableDrag = false) {
     ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
     : "";
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
-  const canConvert = task.type === "todo" && task.status !== todoDoneStatus;
+  const canConvert = task.type === "todo" && !task.linkedIssueId && task.status !== todoDoneStatus;
   const convertButton = pendingConvertTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-convert="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-convert="${task.id}" type="button">Issue 化</button>`;
-  const todoToggleButton = task.type === "issue" && !isDone(task)
-    ? `<button class="tiny-button" data-toggle-todo="${task.id}" type="button">${task.todoPlan ? "Todo解除" : "Todo追加"}</button>`
+  const todoCreateButton = task.type === "issue" && !isDone(task)
+    ? `<button class="tiny-button" data-create-todo="${task.id}" type="button">Todo作成</button>`
     : "";
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
@@ -462,7 +461,7 @@ function taskCard(task, enableDrag = false) {
         <span class="tag">${escapeHtml(task.status)}</span>
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
-        ${todoToggleButton}
+        ${todoCreateButton}
         ${canFinish ? doneButton : ""}
       </div>
     </article>
@@ -523,12 +522,11 @@ function wireTaskButtons(root) {
       openTaskDialog(task.id, { type: "issue", status: state.workflow[0], project: "Issue" });
     });
   });
-  root.querySelectorAll("[data-toggle-todo]").forEach((button) => {
+  root.querySelectorAll("[data-create-todo]").forEach((button) => {
     button.addEventListener("click", () => {
-      const task = state.tasks.find((item) => item.id === button.dataset.toggleTodo);
+      const task = state.tasks.find((item) => item.id === button.dataset.createTodo);
       if (!task || task.type !== "issue") return;
-      updateTask(task.id, { todoPlan: !task.todoPlan });
-      render();
+      openTodoDialogFromIssue(task);
     });
   });
 }
@@ -990,14 +988,28 @@ function openTaskDialog(id, overrides = {}) {
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
   els.taskDue.value = overrides.due || task?.due || todayOffset(3);
   els.taskPriority.value = overrides.priority || task?.priority || "中";
-  els.taskTodoPlan.checked = type === "todo" || Boolean(overrides.todoPlan ?? task?.todoPlan);
-  els.taskTodoPlan.disabled = type === "todo";
+  els.taskLinkedIssueId.value = overrides.linkedIssueId || task?.linkedIssueId || "";
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
   syncIssueLinkRequirement();
-  syncTodoPlanControl();
   els.dialog.showModal();
+}
+
+function openTodoDialogFromIssue(issue) {
+  openTaskDialog("", {
+    type: "todo",
+    title: `調査: ${issue.title}`,
+    project: issue.project,
+    owner: issue.owner,
+    due: todayOffset(0),
+    status: todoOpenStatus,
+    priority: issue.priority,
+    next: "この Issue を調査する。",
+    link: issue.link,
+    linkedIssueId: issue.id,
+    notes: `関連 Issue: ${issue.title}`
+  });
 }
 
 function closeTaskDialog() {
@@ -1033,7 +1045,7 @@ function saveTask(event) {
     due: els.taskDue.value,
     status: els.taskStatus.value,
     priority: els.taskPriority.value,
-    todoPlan: type === "todo" ? false : els.taskTodoPlan.checked,
+    linkedIssueId: type === "todo" ? els.taskLinkedIssueId.value : "",
     next: els.taskNext.value.trim(),
     link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
@@ -1081,12 +1093,6 @@ function syncIssueLinkRequirement() {
   els.taskLink.placeholder = isIssue ? "https://example.com/issues/123" : "任意: https://example.com/issues/123";
 }
 
-function syncTodoPlanControl() {
-  const isTodo = els.taskType.value === "todo";
-  if (isTodo) els.taskTodoPlan.checked = true;
-  els.taskTodoPlan.disabled = isTodo;
-}
-
 function submitTaskDialogWithShortcut(event) {
   if (event.key !== "Enter" || !event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   if (!(event.target instanceof HTMLElement) || !event.target.closest("input, textarea, select")) return;
@@ -1130,7 +1136,7 @@ function searchableTaskText(task) {
     task.link,
     issueNumber,
     issueNumber ? `#${issueNumber}` : "",
-    isTodoItem(task) ? "todo todo事項" : ""
+    task.linkedIssueId ? "関連 issue todo" : ""
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -1223,6 +1229,7 @@ function migrateState(rawState) {
     const mappedStatus = statusMap[task.status] || task.status || fallbackStatus;
     const validIssueStatus = [...migrated.workflow, completedStatus].includes(mappedStatus);
     const validTodoStatus = [todoOpenStatus, todoDoneStatus].includes(mappedStatus);
+    const legacyTodoPlan = type === "issue" && Boolean(task.todoPlan || task.todayPlan);
     return {
       ...task,
       id: task.id || crypto.randomUUID(),
@@ -1232,14 +1239,39 @@ function migrateState(rawState) {
       due: task.due || todayOffset(3),
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
       priority: priorities.includes(task.priority) ? task.priority : "中",
-      todoPlan: type === "todo" ? false : Boolean(task.todoPlan || task.todayPlan),
+      todoPlan: undefined,
       todayPlan: undefined,
+      legacyTodoPlan,
+      linkedIssueId: type === "todo" ? task.linkedIssueId || "" : "",
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || ""
     };
   });
+
+  const linkedTodoIds = new Set(migrated.tasks.filter((task) => task.type === "todo").map((task) => task.linkedIssueId).filter(Boolean));
+  const migratedLegacyTodos = migrated.tasks
+    .filter((task) => task.type === "issue" && task.legacyTodoPlan && !linkedTodoIds.has(task.id))
+    .map((issue) => ({
+      id: `todo-${issue.id}`,
+      type: "todo",
+      title: `調査: ${issue.title}`,
+      project: issue.project,
+      owner: issue.owner,
+      due: todayOffset(0),
+      status: todoOpenStatus,
+      priority: issue.priority,
+      next: "この Issue を調査する。",
+      link: issue.link,
+      linkedIssueId: issue.id,
+      order: Date.now(),
+      notes: `関連 Issue: ${issue.title}`
+    }));
+  migrated.tasks = [
+    ...migratedLegacyTodos,
+    ...migrated.tasks.map(({ legacyTodoPlan, ...task }) => task)
+  ];
 
   migrated.workflow = [...new Set(migrated.workflow.map(normalizeName).filter(Boolean))];
   if (!migrated.workflow.length) migrated.workflow = defaultWorkflow;
@@ -1286,10 +1318,6 @@ function currentView() {
 
 function isDone(task) {
   return task.type === "todo" ? task.status === todoDoneStatus : task.status === completedStatus;
-}
-
-function isTodoItem(task) {
-  return task.type === "todo" || Boolean(task.todoPlan);
 }
 
 function nextWorkflowStep(status) {
