@@ -66,6 +66,7 @@ const els = {
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
   deleteTaskBtn: document.querySelector("#deleteTaskBtn"),
+  createTodoFromIssueBtn: document.querySelector("#createTodoFromIssueBtn"),
   closeDialog: document.querySelector("#closeDialog"),
   cancelDialog: document.querySelector("#cancelDialog"),
   projectList: document.querySelector("#projectList")
@@ -114,6 +115,7 @@ function bindEvents() {
   els.closeDialog.addEventListener("click", closeTaskDialog);
   els.cancelDialog.addEventListener("click", closeTaskDialog);
   els.deleteTaskBtn.addEventListener("click", deleteCurrentTask);
+  els.createTodoFromIssueBtn.addEventListener("click", createTodoFromCurrentIssue);
   els.exportBtn.addEventListener("click", exportData);
   els.importFile.addEventListener("change", importData);
   els.taskLink.addEventListener("input", () => els.taskLink.setCustomValidity(""));
@@ -480,7 +482,7 @@ function todoCard(task) {
     ? (pendingDoneTaskId === task.id
       ? `<button class="todo-check confirm" data-done="${task.id}" type="button" aria-label="完了を確認"></button>`
       : `<button class="todo-check" data-done="${task.id}" type="button" aria-label="完了"></button>`)
-    : `<span class="todo-check done" aria-label="完了済み"></span>`;
+    : `<button class="todo-check done" data-reopen-todo="${task.id}" type="button" aria-label="Todoに戻す"></button>`;
   return `
     <article class="todo-card ${urgencyClass}" data-task-id="${task.id}">
       ${doneButton}
@@ -512,9 +514,6 @@ function taskCard(task, enableDrag = false) {
   const convertButton = pendingConvertTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-convert="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-convert="${task.id}" type="button">Issue 化</button>`;
-  const todoCreateButton = task.type === "issue" && !isDone(task)
-    ? `<button class="tiny-button" data-create-todo="${task.id}" type="button">Todo作成</button>`
-    : "";
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
@@ -533,7 +532,6 @@ function taskCard(task, enableDrag = false) {
         <span class="tag">${escapeHtml(task.status)}</span>
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
-        ${todoCreateButton}
         ${canFinish ? doneButton : ""}
       </div>
     </article>
@@ -583,6 +581,19 @@ function wireTaskButtons(root) {
       render();
     });
   });
+  root.querySelectorAll("[data-reopen-todo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const task = state.tasks.find((item) => item.id === button.dataset.reopenTodo);
+      if (!task || task.type !== "todo" || !isDone(task)) return;
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      updateTask(task.id, {
+        status: todoOpenStatus,
+        completedAt: ""
+      });
+      render();
+    });
+  });
   root.querySelectorAll("[data-convert]").forEach((button) => {
     button.addEventListener("click", () => {
       const task = state.tasks.find((item) => item.id === button.dataset.convert);
@@ -595,13 +606,6 @@ function wireTaskButtons(root) {
       }
       pendingConvertTaskId = "";
       openTaskDialog(task.id, { type: "issue", status: state.workflow[0], project: "Issue" });
-    });
-  });
-  root.querySelectorAll("[data-create-todo]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const task = state.tasks.find((item) => item.id === button.dataset.createTodo);
-      if (!task || task.type !== "issue") return;
-      openTodoDialogFromIssue(task);
     });
   });
 }
@@ -1064,6 +1068,7 @@ function openTaskDialog(id, overrides = {}) {
   const type = overrides.type || task?.type || defaultType;
   els.dialogTitle.textContent = task ? "項目を編集" : "新規項目";
   els.deleteTaskBtn.hidden = !task;
+  els.createTodoFromIssueBtn.hidden = !(task?.type === "issue" && !isDone(task));
   els.taskId.value = task?.id || "";
   els.taskType.value = type;
   fillStatusSelect(type, overrides.status || task?.status);
@@ -1078,6 +1083,13 @@ function openTaskDialog(id, overrides = {}) {
   els.taskNotes.value = overrides.notes || task?.notes || "";
   syncIssueLinkRequirement();
   els.dialog.showModal();
+}
+
+function createTodoFromCurrentIssue() {
+  const issue = state.tasks.find((task) => task.id === els.taskId.value);
+  if (!issue || issue.type !== "issue" || isDone(issue)) return;
+  closeTaskDialog();
+  openTodoDialogFromIssue(issue);
 }
 
 function openTodoDialogFromIssue(issue) {

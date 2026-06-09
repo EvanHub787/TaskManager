@@ -830,7 +830,8 @@ textarea {
 }
 
 .card-heading {
-  display: flex;
+  position: relative;
+  display: block;
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
@@ -839,6 +840,7 @@ textarea {
 
 .task-card h4 {
   min-width: 0;
+  width: 100%;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -848,7 +850,9 @@ textarea {
 }
 
 .card-side {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -877,6 +881,7 @@ textarea {
 
 .task-title-button {
   appearance: none;
+  max-width: 100%;
   min-height: auto;
   padding: 0;
   border: 0;
