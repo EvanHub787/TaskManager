@@ -690,6 +690,19 @@ textarea {
   text-decoration: underline;
 }
 
+.compact-owner-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 28%;
+}
+
+.dashboard-compact-card .owner-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .todo-card-main p {
   flex: 1 1 auto;
   margin: 0;
@@ -705,6 +718,10 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.25;
+}
+
+.todo-card-main .due-text {
+  text-align: right;
 }
 
 .compact-issue-number {

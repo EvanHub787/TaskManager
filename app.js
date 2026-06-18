@@ -62,6 +62,8 @@ const els = {
   taskOwner: document.querySelector("#taskOwner"),
   taskDue: document.querySelector("#taskDue"),
   taskStatus: document.querySelector("#taskStatus"),
+  taskCompletedAtLabel: document.querySelector("#taskCompletedAtLabel"),
+  taskCompletedAt: document.querySelector("#taskCompletedAt"),
   taskPriority: document.querySelector("#taskPriority"),
   taskLinkedIssueId: document.querySelector("#taskLinkedIssueId"),
   taskNext: document.querySelector("#taskNext"),
@@ -125,7 +127,9 @@ function bindEvents() {
   els.taskType.addEventListener("change", () => {
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
+    syncCompletedAtField();
   });
+  els.taskStatus.addEventListener("change", syncCompletedAtField);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
@@ -279,17 +283,20 @@ function renderDashboard() {
     { key: "done", label: "完了", tasks: visible.filter(isDone) }
   ];
   const selectedStat = statItems.find((item) => item.key === dashboardStatFilter);
-  const selectedTasks = selectedStat ? selectedStat.tasks.sort(sortByUrgency) : null;
+  const selectedTasks = selectedStat
+    ? selectedStat.tasks.sort(selectedStat.key === "done" ? sortByCompletedAt : sortByUrgency)
+    : null;
+  const recentDone = visible.filter(isDone).sort(sortByCompletedAt).slice(0, 8);
 
   els.dashboardView.innerHTML = `
     <div class="stats-grid">
       ${statItems.map((item) => stat(item.label, item.tasks.length, item.key)).join("")}
     </div>
     ${selectedStat
-      ? taskSection(`${selectedStat.label} の結果`, selectedTasks)
+      ? compactTaskSection(`${selectedStat.label} の結果`, selectedTasks)
       : `
-        ${taskSection("優先対応", openTasks.sort(sortByUrgency).slice(0, 8))}
-        ${taskSection("最近の完了", visible.filter(isDone).slice(0, 8), `<button class="section-link" data-section-filter="done" type="button">すべての完了を見る &gt;</button>`)}
+        ${compactTaskSection("優先対応", openTasks.sort(sortByUrgency).slice(0, 8))}
+        ${compactTaskSection("最近の完了", recentDone, `<button class="section-link" data-section-filter="done" type="button">すべての完了を見る &gt;</button>`)}
       `}
   `;
   wireDashboardStats();
@@ -454,6 +461,13 @@ function taskSection(title, tasks, action = `<span class="tag">${tasks.length}</
   `;
 }
 
+function compactTaskSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`) {
+  return `
+    <div class="section-title compact-section-title"><h3>${title}</h3>${action}</div>
+    <div class="todo-list dashboard-compact-list">${tasks.length ? tasks.map((task) => compactTaskCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
+  `;
+}
+
 function todoSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`, enableDrag = false) {
   return `
     <div class="section-title compact-section-title"><h3>${title}</h3>${action}</div>
@@ -473,6 +487,50 @@ function todoDoneHistorySection(title, tasks) {
         </section>
       `).join("") : `<div class="empty">7日内の完了はありません</div>`}
     </div>
+  `;
+}
+
+function compactTaskCard(task) {
+  const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
+  const issueNumber = extractIssueNumber(task.link);
+  const taskUrl = normalizeUrl(task.link);
+  const issueBadge = issueNumber
+    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    : "";
+  const doneButton = !isDone(task)
+    ? (pendingDoneTaskId === task.id
+      ? `<button class="todo-check confirm" data-done="${task.id}" type="button" aria-label="完了を確認"></button>`
+      : `<button class="todo-check" data-done="${task.id}" type="button" aria-label="完了"></button>`)
+    : task.type === "todo"
+      ? `<button class="todo-check done" data-reopen-todo="${task.id}" type="button" aria-label="Todoに戻す"></button>`
+      : `<span class="todo-check done" aria-label="完了済み"></span>`;
+  const ownerMenu = ownerPickerTaskId === task.id
+    ? `<div class="owner-menu" role="menu">
+        ${state.members.map((member) => `
+          <button class="owner-choice${member === task.owner ? " active" : ""}" data-owner-choice="${escapeHtml(member)}" data-owner-task="${task.id}" type="button" role="menuitem">${escapeHtml(member)}</button>
+        `).join("")}
+      </div>`
+    : "";
+
+  return `
+    <article class="todo-card dashboard-compact-card ${urgencyClass}" data-task-id="${task.id}">
+      ${doneButton}
+      <div class="todo-card-main">
+        <div class="todo-title-row">
+          ${issueBadge}
+          <button class="todo-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>
+          <div class="compact-owner-wrap">
+            <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
+            ${ownerMenu}
+          </div>
+        </div>
+        <div class="todo-detail-row">
+          <p>${escapeHtml(task.next)}</p>
+          <button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>
+          ${dueText(task)}
+        </div>
+      </div>
+    </article>
   `;
 }
 
@@ -1234,10 +1292,12 @@ function openTaskDialog(id, overrides = {}) {
   els.taskDue.value = overrides.due || task?.due || todayOffset(3);
   els.taskPriority.value = overrides.priority || task?.priority || "中";
   els.taskLinkedIssueId.value = overrides.linkedIssueId || task?.linkedIssueId || "";
+  els.taskCompletedAt.value = overrides.completedAt || task?.completedAt || todayOffset(0);
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
   syncIssueLinkRequirement();
+  syncCompletedAtField();
   els.dialog.showModal();
 }
 
@@ -1276,8 +1336,9 @@ function saveTask(event) {
   const existingTask = state.tasks.find((item) => item.id === id);
   const link = normalizeUrl(els.taskLink.value);
   const status = els.taskStatus.value;
-  const completedAt = status === (type === "todo" ? todoDoneStatus : completedStatus)
-    ? existingTask?.completedAt || todayOffset(0)
+  const doneStatus = type === "todo" ? todoDoneStatus : completedStatus;
+  const completedAt = status === doneStatus
+    ? els.taskCompletedAt.value || existingTask?.completedAt || todayOffset(0)
     : "";
 
   if (type === "issue" && !extractIssueNumber(link)) {
@@ -1354,6 +1415,16 @@ function syncIssueLinkRequirement() {
   const isIssue = els.taskType.value === "issue";
   els.taskLink.required = isIssue;
   els.taskLink.placeholder = isIssue ? "https://example.com/issues/123" : "任意: https://example.com/issues/123";
+}
+
+function syncCompletedAtField() {
+  const doneStatus = els.taskType.value === "todo" ? todoDoneStatus : completedStatus;
+  const isCompleted = els.taskStatus.value === doneStatus;
+  els.taskCompletedAtLabel.hidden = !isCompleted;
+  els.taskCompletedAt.required = isCompleted;
+  if (isCompleted && !els.taskCompletedAt.value) {
+    els.taskCompletedAt.value = todayOffset(0);
+  }
 }
 
 function submitTaskDialogWithShortcut(event) {
