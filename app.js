@@ -122,6 +122,7 @@ function bindEvents() {
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
+  document.addEventListener("click", closeWorkflowMenuOnOutsideClick, true);
   document.addEventListener("click", clearPendingDoneOnOtherClick);
   document.addEventListener("click", closeOwnerPickerOnOtherClick);
   document.addEventListener("input", clearPendingDoneConfirmation);
@@ -1039,6 +1040,16 @@ function wireWorkflowButtons() {
     const beforeIndex = placeholder?.nextElementSibling?.dataset.workflowIndex;
     moveWorkflowStep(fromIndex, beforeIndex === undefined ? state.workflow.length : Number(beforeIndex));
   });
+}
+
+function closeWorkflowMenuOnOutsideClick(event) {
+  const workflowMenu = els.workflowTopSlot.querySelector(".workflow-top-menu");
+  const target = event.target instanceof Element ? event.target : null;
+  if (!workflowMenu?.open || target?.closest(".workflow-top-menu")) return;
+  workflowMenu.open = false;
+  keepWorkflowMenuOpen = false;
+  event.preventDefault();
+  event.stopImmediatePropagation();
 }
 
 function wireMemberButtons() {
