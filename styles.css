@@ -1335,6 +1335,10 @@ label {
   font-size: 13px;
 }
 
+label[hidden] {
+  display: none;
+}
+
 .full-label {
   margin-bottom: 12px;
 }
