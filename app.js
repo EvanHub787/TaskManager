@@ -379,31 +379,38 @@ function renderTodo() {
 }
 
 function renderProjects() {
-  const projects = groupBy(filteredTasks(), "project");
+  const projects = groupBy(state.tasks, "project");
   const rows = Object.entries(projects).sort(([a], [b]) => a.localeCompare(b, "zh-Hans-CN")).map(([project, tasks]) => {
     const done = tasks.filter(isDone).length;
+    const open = tasks.length - done;
     const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+    const issues = tasks.filter((task) => task.type === "issue" && !isDone(task)).length;
+    const todos = tasks.filter((task) => task.type === "todo" && !isDone(task)).length;
     const high = tasks.filter((task) => task.priority === "高" && !isDone(task)).length;
-    const next = tasks.filter((task) => !isDone(task)).sort(sortByUrgency)[0];
+    const overdue = tasks.filter((task) => !isDone(task) && daysUntil(task.due) < 0).length;
     return `
       <tr>
-        <td><strong>${escapeHtml(project)}</strong><div class="progress"><span style="width:${progress}%"></span></div></td>
+        <td><button class="table-link" data-project-filter="${escapeHtml(project)}" type="button">${escapeHtml(project)}</button><div class="progress"><span style="width:${progress}%"></span></div></td>
         <td>${tasks.length}</td>
-        <td>${progress}%</td>
+        <td>${open}</td>
+        <td>${issues}</td>
+        <td>${todos}</td>
         <td>${high}</td>
-        <td>${next ? `${escapeHtml(next.title)}<br><span class="meta">${taskLabel(next)} · ${escapeHtml(next.owner)} · ${formatDue(next.due)}</span>` : "なし"}</td>
+        <td>${overdue}</td>
+        <td>${progress}%</td>
       </tr>
     `;
   }).join("");
 
   els.projectsView.innerHTML = rows
-    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>完了率</th><th>高優先度の未完了</th><th>次の対応</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>未完了</th><th>Issue</th><th>Todo</th><th>高優先度</th><th>期限超過</th><th>完了率</th></tr></thead><tbody>${rows}</tbody></table>`
     : `<div class="empty">案件はありません</div>`;
+  wireTaskButtons(els.projectsView);
 }
 
 function renderPeople() {
   const rows = state.members.map((member) => {
-    const tasks = filteredTasks().filter((task) => task.owner === member);
+    const tasks = state.tasks.filter((task) => task.owner === member);
     const open = tasks.filter((task) => !isDone(task));
     const overdue = open.filter((task) => daysUntil(task.due) < 0);
     const issues = open.filter((task) => task.type === "issue");
@@ -639,7 +646,8 @@ function wireTaskButtons(root) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      filterTasksByProject(button.dataset.projectFilter, currentView());
+      const targetView = currentView() === "projects" ? "dashboard" : currentView();
+      filterTasksByProject(button.dataset.projectFilter, targetView);
     });
   });
   root.querySelectorAll("[data-advance]").forEach((button) => {
