@@ -24,12 +24,14 @@ let workflowDragPlaceholderHeight = 52;
 let filters = {
   search: "",
   owner: "all",
-  priority: "all"
+  priority: "all",
+  project: "all"
 };
 let dashboardStatFilter = "";
 let pendingDoneTaskId = "";
 let pendingConvertTaskId = "";
 let showAllTodoDone = false;
+let ownerPickerTaskId = "";
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -101,8 +103,9 @@ function bindEvents() {
   });
 
   els.resetFilters.addEventListener("click", () => {
-    filters = { search: "", owner: "all", priority: "all" };
+    filters = { search: "", owner: "all", priority: "all", project: "all" };
     dashboardStatFilter = "";
+    ownerPickerTaskId = "";
     els.searchInput.value = "";
     els.ownerFilter.value = "all";
     els.priorityFilter.value = "all";
@@ -127,6 +130,7 @@ function bindEvents() {
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
   document.addEventListener("click", clearPendingDoneOnOtherClick);
+  document.addEventListener("click", closeOwnerPickerOnOtherClick);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
 }
@@ -230,7 +234,7 @@ function renderProjectList() {
 function renderTodayFocus() {
   const focusTasks = state.tasks
     .filter((task) => task.type === "todo" && !isDone(task))
-    .sort(sortByTodo);
+    .sort(sortByBoardOrder);
 
   els.todayFocus.innerHTML = focusTasks.length
     ? focusTasks.map((task) => focusItem(task)).join("")
@@ -355,7 +359,7 @@ function workflowStepRow(step, index) {
 
 function renderTodo() {
   const todos = filteredTasks().filter((task) => task.type === "todo");
-  const open = todos.filter((task) => !isDone(task)).sort(sortByTodo);
+  const open = todos.filter((task) => !isDone(task)).sort(sortByBoardOrder);
   const done = todos.filter(isDone).sort(sortByCompletedAt);
   const todayDone = done.filter((task) => completionDate(task) === todayOffset(0));
   const recentDone = done.filter((task) => {
@@ -364,13 +368,14 @@ function renderTodo() {
   });
 
   els.todoView.innerHTML = `
-    ${todoSection("To-do List", open)}
+    ${todoSection("To-do List", open, `<span class="tag">${open.length}</span>`, true)}
     ${showAllTodoDone
       ? todoDoneHistorySection("完了", recentDone)
       : todoSection("完了", todayDone, `<button class="section-link" data-todo-done-view="all" type="button">すべての完了を見る &gt;</button>`)}
   `;
   wireTodoDoneViewButtons();
   wireTaskButtons(els.todoView);
+  wireTodoDragAndDrop();
 }
 
 function renderProjects() {
@@ -449,10 +454,10 @@ function taskSection(title, tasks, action = `<span class="tag">${tasks.length}</
   `;
 }
 
-function todoSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`) {
+function todoSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`, enableDrag = false) {
   return `
     <div class="section-title compact-section-title"><h3>${title}</h3>${action}</div>
-    <div class="todo-list">${tasks.length ? tasks.map((task) => todoCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
+    <div class="todo-list" ${enableDrag ? `data-todo-drop-zone="open"` : ""}>${tasks.length ? tasks.map((task) => todoCard(task, enableDrag)).join("") : `<div class="empty">項目はありません</div>`}</div>
   `;
 }
 
@@ -471,7 +476,7 @@ function todoDoneHistorySection(title, tasks) {
   `;
 }
 
-function todoCard(task) {
+function todoCard(task, enableDrag = false) {
   const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
@@ -484,7 +489,7 @@ function todoCard(task) {
       : `<button class="todo-check" data-done="${task.id}" type="button" aria-label="完了"></button>`)
     : `<button class="todo-check done" data-reopen-todo="${task.id}" type="button" aria-label="Todoに戻す"></button>`;
   return `
-    <article class="todo-card ${urgencyClass}" data-task-id="${task.id}">
+    <article class="todo-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && !isDone(task) ? `draggable="true"` : ""}>
       ${doneButton}
       <div class="todo-card-main">
         <div class="todo-title-row">
@@ -493,7 +498,7 @@ function todoCard(task) {
         </div>
         <div class="todo-detail-row">
           <p>${escapeHtml(task.next)}</p>
-          <span>${escapeHtml(task.project)}</span>
+          <button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>
         </div>
       </div>
     </article>
@@ -517,15 +522,23 @@ function taskCard(task, enableDrag = false) {
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
+  const ownerMenu = ownerPickerTaskId === task.id
+    ? `<div class="owner-menu" role="menu">
+        ${state.members.map((member) => `
+          <button class="owner-choice${member === task.owner ? " active" : ""}" data-owner-choice="${escapeHtml(member)}" data-owner-task="${task.id}" type="button" role="menuitem">${escapeHtml(member)}</button>
+        `).join("")}
+      </div>`
+    : "";
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
         <h4>${issueBadge}${title}</h4>
         <div class="card-side">
-          <button class="owner-name" data-owner-filter="${escapeHtml(task.owner)}" type="button">${escapeHtml(task.owner)}</button>
+          <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
+          ${ownerMenu}
         </div>
       </div>
-      <div class="meta"><span>${escapeHtml(task.project)}</span>${dueText(task)}</div>
+      <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>${dueText(task)}</div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
@@ -548,11 +561,35 @@ function wireTaskButtons(root) {
   root.querySelectorAll("[data-title-edit]").forEach((button) => {
     button.addEventListener("click", () => openTaskDialog(button.dataset.titleEdit));
   });
-  root.querySelectorAll("[data-owner-filter]").forEach((button) => {
+  root.querySelectorAll("[data-owner-picker]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      filterTasksByMember(button.dataset.ownerFilter, currentView());
+      ownerPickerTaskId = ownerPickerTaskId === button.dataset.ownerPicker ? "" : button.dataset.ownerPicker;
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-owner-choice]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const taskId = button.dataset.ownerTask;
+      const owner = button.dataset.ownerChoice;
+      if (!taskId || !owner) return;
+      updateTask(taskId, { owner });
+      ownerPickerTaskId = "";
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-project-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      filterTasksByProject(button.dataset.projectFilter, currentView());
     });
   });
   root.querySelectorAll("[data-advance]").forEach((button) => {
@@ -677,6 +714,67 @@ function wireBoardDragAndDrop() {
   });
 }
 
+function wireTodoDragAndDrop() {
+  const dropZone = els.todoView.querySelector("[data-todo-drop-zone='open']");
+  if (!dropZone) return;
+
+  dropZone.querySelectorAll(".todo-card[draggable='true']").forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest("a, button, input, select, textarea")) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.taskId);
+      dragPlaceholderHeight = Math.max(40, Math.round(card.getBoundingClientRect().height));
+      card.classList.add("dragging");
+    });
+
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      clearTodoDropIndicators();
+    });
+
+    card.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const draggingId = dropZone.querySelector(".todo-card.dragging")?.dataset.taskId;
+      if (draggingId && draggingId !== card.dataset.taskId) {
+        showTodoDropPlaceholder(dropZone, card);
+      }
+    });
+
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const draggedId = event.dataTransfer.getData("text/plain");
+      if (!draggedId || draggedId === card.dataset.taskId) return;
+      moveTodoTask(draggedId, card.dataset.taskId);
+    });
+  });
+
+  dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropZone.classList.add("drop-active");
+    if (event.target.closest(".drop-placeholder")) return;
+    if (!event.target.closest(".todo-card")) {
+      showTodoDropPlaceholder(dropZone, null);
+    }
+  });
+
+  dropZone.addEventListener("dragleave", (event) => {
+    if (!dropZone.contains(event.relatedTarget)) {
+      dropZone.classList.remove("drop-active");
+    }
+  });
+
+  dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData("text/plain");
+    if (!draggedId || event.target.closest(".todo-card")) return;
+    const beforeId = dropZone.querySelector(".drop-placeholder")?.nextElementSibling?.dataset.taskId || "";
+    moveTodoTask(draggedId, beforeId);
+  });
+}
+
 function suppressNextBoardClick() {
   suppressBoardClickUntil = Date.now() + 250;
 }
@@ -751,6 +849,46 @@ function moveIssueTask(taskId, targetStatus, beforeId) {
   render();
 }
 
+function showTodoDropPlaceholder(dropZone, beforeCard) {
+  if (!dropZone) return;
+  const beforeId = beforeCard?.dataset.taskId || "";
+  if (activeDropZone === dropZone && activeBeforeId === beforeId) return;
+
+  const placeholder = getTodoDropPlaceholder();
+  placeholder.style.minHeight = `${dragPlaceholderHeight}px`;
+  if (beforeCard && beforeCard.parentElement === dropZone) {
+    dropZone.insertBefore(placeholder, beforeCard);
+  } else if (placeholder.parentElement !== dropZone || placeholder.nextElementSibling) {
+    dropZone.appendChild(placeholder);
+  }
+  activeDropZone = dropZone;
+  activeBeforeId = beforeId;
+}
+
+function getTodoDropPlaceholder() {
+  let placeholder = els.todoView.querySelector(".drop-placeholder");
+  if (!placeholder) {
+    placeholder = document.createElement("div");
+    placeholder.className = "drop-placeholder";
+    placeholder.textContent = "ここに移動";
+  }
+  return placeholder;
+}
+
+function moveTodoTask(taskId, beforeId) {
+  const task = state.tasks.find((item) => item.id === taskId && item.type === "todo" && !isDone(item));
+  if (!task) return;
+  const targetTasks = state.tasks
+    .filter((item) => item.type === "todo" && !isDone(item) && item.id !== taskId)
+    .sort(sortByBoardOrder);
+  const beforeIndex = beforeId ? targetTasks.findIndex((item) => item.id === beforeId) : -1;
+  const insertIndex = beforeIndex >= 0 ? beforeIndex : targetTasks.length;
+  targetTasks.splice(insertIndex, 0, task);
+  const indexById = new Map(targetTasks.map((item, index) => [item.id, index]));
+  state.tasks = state.tasks.map((item) => indexById.has(item.id) ? { ...item, order: indexById.get(item.id) } : item);
+  render();
+}
+
 function reindexIssueStatus(status) {
   const ordered = state.tasks
     .filter((task) => task.type === "issue" && task.status === status)
@@ -762,6 +900,13 @@ function reindexIssueStatus(status) {
 function clearDropIndicators() {
   els.boardView.querySelectorAll(".drop-active").forEach((element) => element.classList.remove("drop-active"));
   els.boardView.querySelector(".drop-placeholder")?.remove();
+  activeDropZone = null;
+  activeBeforeId = "";
+}
+
+function clearTodoDropIndicators() {
+  els.todoView.querySelectorAll(".drop-active").forEach((element) => element.classList.remove("drop-active"));
+  els.todoView.querySelector(".drop-placeholder")?.remove();
   activeDropZone = null;
   activeBeforeId = "";
 }
@@ -1011,6 +1156,17 @@ function filterTasksByMember(member, targetView = "dashboard") {
   dashboardStatFilter = "";
   pendingDoneTaskId = "";
   pendingConvertTaskId = "";
+  ownerPickerTaskId = "";
+  switchView(targetView);
+  render();
+}
+
+function filterTasksByProject(project, targetView = "dashboard") {
+  filters.project = project;
+  dashboardStatFilter = "";
+  pendingDoneTaskId = "";
+  pendingConvertTaskId = "";
+  ownerPickerTaskId = "";
   switchView(targetView);
   render();
 }
@@ -1177,6 +1333,12 @@ function clearPendingDoneOnOtherClick(event) {
   clearPendingConfirmations();
 }
 
+function closeOwnerPickerOnOtherClick(event) {
+  if (!ownerPickerTaskId || event.target.closest("[data-owner-picker], [data-owner-choice]")) return;
+  ownerPickerTaskId = "";
+  render();
+}
+
 function clearPendingDoneConfirmation() {
   clearPendingConfirmations();
 }
@@ -1219,7 +1381,8 @@ function filteredTasks() {
     const matchSearch = !filters.search || haystack.includes(filters.search);
     const matchOwner = filters.owner === "all" || task.owner === filters.owner;
     const matchPriority = filters.priority === "all" || task.priority === filters.priority;
-    return matchSearch && matchOwner && matchPriority;
+    const matchProject = filters.project === "all" || task.project === filters.project;
+    return matchSearch && matchOwner && matchPriority && matchProject;
   });
 }
 
