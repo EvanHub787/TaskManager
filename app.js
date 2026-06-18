@@ -29,6 +29,8 @@ let pendingDoneTaskId = "";
 let pendingConvertTaskId = "";
 let showAllTodoDone = false;
 let ownerPickerTaskId = "";
+let currentTaskAttachments = [];
+let storageQuotaAlertShown = false;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -63,6 +65,12 @@ const els = {
   taskNext: document.querySelector("#taskNext"),
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
+  taskImages: document.querySelector("#taskImages"),
+  taskAttachmentList: document.querySelector("#taskAttachmentList"),
+  imagePreviewDialog: document.querySelector("#imagePreviewDialog"),
+  imagePreview: document.querySelector("#imagePreview"),
+  imagePreviewName: document.querySelector("#imagePreviewName"),
+  closeImagePreview: document.querySelector("#closeImagePreview"),
   deleteTaskBtn: document.querySelector("#deleteTaskBtn"),
   createTodoFromIssueBtn: document.querySelector("#createTodoFromIssueBtn"),
   closeDialog: document.querySelector("#closeDialog"),
@@ -98,6 +106,13 @@ function bindEvents() {
   els.exportBtn.addEventListener("click", exportData);
   els.importFile.addEventListener("change", importData);
   els.taskLink.addEventListener("input", () => els.taskLink.setCustomValidity(""));
+  els.taskNext.addEventListener("input", autoResizeTaskNext);
+  els.taskImages.addEventListener("change", handleTaskImageFiles);
+  els.taskNotes.addEventListener("paste", handleTaskImagePaste);
+  els.taskAttachmentList.addEventListener("click", removeTaskAttachment);
+  els.taskAttachmentList.addEventListener("click", openTaskAttachmentPreview);
+  els.closeImagePreview.addEventListener("click", closeTaskAttachmentPreview);
+  els.imagePreviewDialog.addEventListener("click", closeTaskAttachmentPreviewFromBackdrop);
   els.taskType.addEventListener("change", () => {
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
@@ -578,7 +593,6 @@ function taskCard(task, enableDrag = false) {
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
-        <span class="tag">${escapeHtml(task.status)}</span>
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
         ${canFinish ? doneButton : ""}
@@ -1270,9 +1284,143 @@ function openTaskDialog(id, overrides = {}) {
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
+  currentTaskAttachments = normalizeAttachments(overrides.attachments || task?.attachments || []);
+  els.taskImages.value = "";
+  renderTaskAttachments();
   syncIssueLinkRequirement();
   syncCompletedAtField();
   els.dialog.showModal();
+  autoResizeTaskNext();
+}
+
+function autoResizeTaskNext() {
+  const textarea = els.taskNext;
+  const styles = window.getComputedStyle(textarea);
+  const lineHeight = parseFloat(styles.lineHeight) || 20;
+  const padding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+  const border = parseFloat(styles.borderTopWidth) + parseFloat(styles.borderBottomWidth);
+  const minHeight = lineHeight * 3 + padding + border;
+  const maxHeight = lineHeight * 10 + padding + border;
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
+async function handleTaskImageFiles(event) {
+  await addTaskImageFiles([...event.target.files]);
+  event.target.value = "";
+}
+
+async function handleTaskImagePaste(event) {
+  const files = [...event.clipboardData?.files || []].filter((file) => file.type.startsWith("image/"));
+  if (!files.length) return;
+  event.preventDefault();
+  await addTaskImageFiles(files);
+}
+
+async function addTaskImageFiles(files) {
+  const images = files.filter((file) => file.type.startsWith("image/"));
+  if (!images.length) return;
+  const converted = await Promise.all(images.map(fileToAttachment));
+  currentTaskAttachments = [...currentTaskAttachments, ...converted.filter(Boolean)];
+  renderTaskAttachments();
+}
+
+async function fileToAttachment(file) {
+  try {
+    const dataUrl = await resizeImageFile(file);
+    return {
+      id: crypto.randomUUID(),
+      name: file.name || "clipboard-image",
+      type: dataUrl.slice(5, dataUrl.indexOf(";")) || file.type,
+      dataUrl
+    };
+  } catch {
+    alert("画像の追加に失敗しました。別の画像を選択してください。");
+    return null;
+  }
+}
+
+function resizeImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = reject;
+      image.onload = () => {
+        const maxSide = 1280;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderTaskAttachments() {
+  if (!currentTaskAttachments.length) {
+    els.taskAttachmentList.innerHTML = "";
+    return;
+  }
+  els.taskAttachmentList.innerHTML = currentTaskAttachments.map((attachment) => `
+    <figure class="attachment-item">
+      <button class="attachment-preview-button" data-attachment-preview="${escapeHtml(attachment.id)}" type="button" aria-label="画像を拡大">
+        <img src="${escapeHtml(attachment.dataUrl)}" alt="${escapeHtml(attachment.name)}">
+      </button>
+      <figcaption>${escapeHtml(attachment.name)}</figcaption>
+      <button class="attachment-remove" data-attachment-remove="${escapeHtml(attachment.id)}" type="button" aria-label="画像を削除">削除</button>
+    </figure>
+  `).join("");
+}
+
+function openTaskAttachmentPreview(event) {
+  const button = event.target.closest("[data-attachment-preview]");
+  if (!button) return;
+  const attachment = currentTaskAttachments.find((item) => item.id === button.dataset.attachmentPreview);
+  if (!attachment) return;
+  els.imagePreview.src = attachment.dataUrl;
+  els.imagePreview.alt = attachment.name;
+  els.imagePreviewName.textContent = attachment.name;
+  els.imagePreviewDialog.showModal();
+}
+
+function closeTaskAttachmentPreview() {
+  els.imagePreviewDialog.close();
+  els.imagePreview.removeAttribute("src");
+  els.imagePreviewName.textContent = "";
+}
+
+function closeTaskAttachmentPreviewFromBackdrop(event) {
+  if (event.target === els.imagePreviewDialog) {
+    closeTaskAttachmentPreview();
+  }
+}
+
+function removeTaskAttachment(event) {
+  const button = event.target.closest("[data-attachment-remove]");
+  if (!button) return;
+  currentTaskAttachments = currentTaskAttachments.filter((attachment) => attachment.id !== button.dataset.attachmentRemove);
+  renderTaskAttachments();
+}
+
+function normalizeAttachments(attachments) {
+  return Array.isArray(attachments)
+    ? attachments.filter((attachment) => attachment?.dataUrl).map((attachment) => ({
+      id: attachment.id || crypto.randomUUID(),
+      name: attachment.name || "image",
+      type: attachment.type || "image/*",
+      dataUrl: attachment.dataUrl
+    }))
+    : [];
 }
 
 function createTodoFromCurrentIssue() {
@@ -1341,7 +1489,8 @@ function saveTask(event) {
     next: els.taskNext.value.trim(),
     link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
-    notes: els.taskNotes.value.trim()
+    notes: els.taskNotes.value.trim(),
+    attachments: normalizeAttachments(currentTaskAttachments)
   };
 
   const index = state.tasks.findIndex((item) => item.id === id);
@@ -1387,6 +1536,7 @@ function clearPendingConfirmations() {
 
 function syncIssueLinkRequirement() {
   const isIssue = els.taskType.value === "issue";
+  els.taskLink.setCustomValidity("");
   els.taskLink.required = isIssue;
   els.taskLink.placeholder = isIssue ? "https://example.com/issues/123" : "任意: https://example.com/issues/123";
 }
@@ -1438,6 +1588,7 @@ function searchableTaskText(task) {
     task.priority,
     task.next,
     task.notes,
+    ...(Array.isArray(task.attachments) ? task.attachments.map((attachment) => attachment.name).filter(Boolean) : []),
     task.link,
     issueNumber,
     issueNumber ? `#${issueNumber}` : "",
@@ -1499,7 +1650,15 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(state));
+    storageQuotaAlertShown = false;
+  } catch {
+    if (!storageQuotaAlertShown) {
+      storageQuotaAlertShown = true;
+      alert("データを保存できませんでした。画像を減らすか、小さい画像を追加してください。");
+    }
+  }
 }
 
 function migrateState(rawState) {
@@ -1552,7 +1711,8 @@ function migrateState(rawState) {
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       order: Number.isFinite(task.order) ? task.order : index,
-      notes: task.notes || ""
+      notes: task.notes || "",
+      attachments: normalizeAttachments(task.attachments)
     };
   });
 
@@ -1573,7 +1733,8 @@ function migrateState(rawState) {
       linkedIssueId: issue.id,
       completedAt: "",
       order: Date.now(),
-      notes: `関連 Issue: ${issue.title}`
+      notes: `関連 Issue: ${issue.title}`,
+      attachments: []
     }));
   migrated.tasks = [
     ...migratedLegacyTodos,
@@ -1709,7 +1870,7 @@ function formatDue(dateString) {
   if (diff < 0) return `${Math.abs(diff)}日遅れ`;
   if (diff === 0) return "本日締切";
   if (diff === 1) return "明日締切";
-  return `${dateString} 期限`;
+  return dateString;
 }
 
 function completionDate(task) {

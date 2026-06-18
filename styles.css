@@ -384,6 +384,150 @@ svg {
   cursor: pointer;
 }
 
+.attachment-panel {
+  display: grid;
+  gap: 10px;
+  margin: -2px 0 14px;
+}
+
+.attachment-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.attachment-add {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.attachment-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.attachment-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+}
+
+.attachment-item {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.attachment-preview-button {
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.attachment-preview-button img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.attachment-preview-button:hover img {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.attachment-item figcaption {
+  overflow: hidden;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid #f0b8ae;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .92);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.image-preview-dialog {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.image-preview-dialog::backdrop {
+  background: rgba(13, 22, 18, .72);
+}
+
+.image-preview-shell {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 44px 16px 14px;
+  border-radius: 8px;
+  background: #101713;
+}
+
+.image-preview-shell img {
+  max-width: 100%;
+  max-height: calc(100vh - 130px);
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.image-preview-shell p {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: #f4faf6;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border-color: rgba(255, 255, 255, .24);
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+}
+
 .plain {
   border: 0;
 }
@@ -466,6 +610,10 @@ input {
 textarea {
   padding: 10px;
   resize: vertical;
+}
+
+#taskNext {
+  resize: none;
 }
 
 .view {
@@ -1301,6 +1449,10 @@ dialog::backdrop {
   margin: 18px 0 12px;
 }
 
+.task-meta-grid {
+  margin-top: 4px;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -1314,6 +1466,10 @@ label[hidden] {
 
 .full-label {
   margin-bottom: 12px;
+}
+
+.title-label input {
+  font-weight: 700;
 }
 
 .spacer {

@@ -120,9 +120,13 @@
         </button>
       </div>
       <input id="taskId" type="hidden">
-      <div class="form-grid">
+      <label class="full-label title-label">タスク名<input id="taskTitle" required maxlength="80"></label>
+      <label class="full-label">次のアクション<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
+      <label class="full-label">Issue URL / Issue 番号<input id="taskLink" inputmode="url" maxlength="300"
+          placeholder="https://example.com/issues/123"></label>
+      <input id="taskLinkedIssueId" type="hidden">
+      <div class="form-grid task-meta-grid">
         <label>種別<select id="taskType" required></select></label>
-        <label>タスク名<input id="taskTitle" required maxlength="80"></label>
         <label>案件<input id="taskProject" list="projectList" required maxlength="60"></label>
         <label>担当者<select id="taskOwner" required></select></label>
         <label>期限<input id="taskDue" type="date" required></label>
@@ -130,11 +134,16 @@
         <label id="taskCompletedAtLabel" hidden>完了日<input id="taskCompletedAt" type="date"></label>
         <label>優先度<select id="taskPriority" required></select></label>
       </div>
-      <input id="taskLinkedIssueId" type="hidden">
-      <label class="full-label">次のアクション<textarea id="taskNext" rows="3" required maxlength="220"></textarea></label>
-      <label class="full-label">Issue URL / Issue 番号<input id="taskLink" inputmode="url" maxlength="300"
-          placeholder="https://example.com/issues/123"></label>
       <label class="full-label">メモ<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
+      <div class="attachment-panel">
+        <div class="attachment-toolbar">
+          <label class="file-button attachment-add">画像追加
+            <input id="taskImages" type="file" accept="image/*" multiple>
+          </label>
+          <span class="attachment-help">メモ欄へ画像を貼り付けても追加できます</span>
+        </div>
+        <div id="taskAttachmentList" class="attachment-list"></div>
+      </div>
       <div class="dialog-actions">
         <button id="deleteTaskBtn" class="danger-button" type="button">削除</button>
         <button id="createTodoFromIssueBtn" class="secondary-button" type="button" hidden>Todoに追加</button>
@@ -143,6 +152,18 @@
         <button class="primary-button" value="default" type="submit">保存</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="imagePreviewDialog" class="image-preview-dialog">
+    <div class="image-preview-shell">
+      <button id="closeImagePreview" class="icon-button plain image-preview-close" type="button" aria-label="閉じる">
+        <svg viewBox="0 0 24 24">
+          <path d="M6 6l12 12M18 6 6 18"></path>
+        </svg>
+      </button>
+      <img id="imagePreview" alt="">
+      <p id="imagePreviewName"></p>
+    </div>
   </dialog>
 
   <datalist id="projectList"></datalist>
