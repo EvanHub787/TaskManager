@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TaskManager</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260618-search-only">
 </head>
 
 <body>
@@ -98,28 +98,6 @@
             </svg>
             <input id="searchInput" type="search" placeholder="タスク、案件、担当者、次のアクションを検索">
           </div>
-          <details class="action-menu filter-menu">
-            <summary class="secondary-button">フィルター</summary>
-            <div class="action-menu-content filter-menu-content">
-              <label>
-                <span>担当者</span>
-                <select id="ownerFilter" aria-label="担当者フィルター"></select>
-              </label>
-              <label>
-                <span>優先度</span>
-                <select id="priorityFilter" aria-label="優先度フィルター">
-                  <option value="all">すべての優先度</option>
-                  <option value="高">高優先度</option>
-                  <option value="中">中優先度</option>
-                  <option value="低">低優先度</option>
-                </select>
-              </label>
-              <button id="resetFilters" class="menu-item reset-menu-item" type="button">
-                <span>フィルター解除</span>
-                <small>検索条件をリセット</small>
-              </button>
-            </div>
-          </details>
         </section>
       </div>
 
@@ -168,7 +146,7 @@
   </dialog>
 
   <datalist id="projectList"></datalist>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260618-search-only"></script>
 </body>
 
 </html>

@@ -390,34 +390,10 @@ svg {
 
 .filters {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto;
+  grid-template-columns: minmax(280px, 1fr);
   align-items: center;
   gap: 10px;
   margin-bottom: 0;
-}
-
-.filter-menu {
-  justify-self: end;
-}
-
-.filter-menu-content {
-  width: 280px;
-}
-
-.filter-menu-content label {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.filter-menu-content select {
-  width: 100%;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .menu-item {
@@ -864,16 +840,15 @@ textarea {
 
 .card-heading {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 10px;
   margin: 0 0 8px;
 }
 
 .task-card h4 {
   min-width: 0;
-  width: 100%;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -883,13 +858,11 @@ textarea {
 }
 
 .card-side {
-  position: absolute;
-  top: 0;
-  right: 0;
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: 42%;
+  max-width: 72px;
 }
 
 .owner-name {
@@ -1395,10 +1368,13 @@ label[hidden] {
     display: none;
   }
 
-  .filters,
   .stats-grid,
   .member-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filters {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1422,7 +1398,6 @@ label[hidden] {
     flex-wrap: wrap;
   }
 
-  .filters,
   .stats-grid,
   .form-grid,
   .member-form,
@@ -1431,6 +1406,10 @@ label[hidden] {
   .workflow-form,
   .workflow-list,
   .workflow-row {
+    grid-template-columns: 1fr;
+  }
+
+  .filters {
     grid-template-columns: 1fr;
   }
 

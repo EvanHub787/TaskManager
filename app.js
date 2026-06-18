@@ -22,10 +22,7 @@ let suppressBoardClickUntil = 0;
 let keepWorkflowMenuOpen = false;
 let workflowDragPlaceholderHeight = 52;
 let filters = {
-  search: "",
-  owner: "all",
-  priority: "all",
-  project: "all"
+  search: ""
 };
 let dashboardStatFilter = "";
 let pendingDoneTaskId = "";
@@ -43,9 +40,6 @@ const els = {
   peopleView: document.querySelector("#peopleView"),
   todayFocus: document.querySelector("#todayFocus"),
   searchInput: document.querySelector("#searchInput"),
-  ownerFilter: document.querySelector("#ownerFilter"),
-  priorityFilter: document.querySelector("#priorityFilter"),
-  resetFilters: document.querySelector("#resetFilters"),
   addTaskBtn: document.querySelector("#addTaskBtn"),
   workflowTopSlot: document.querySelector("#workflowTopSlot"),
   openDataFileBtn: document.querySelector("#openDataFileBtn"),
@@ -91,26 +85,6 @@ function bindEvents() {
 
   els.searchInput.addEventListener("input", (event) => {
     filters.search = event.target.value.trim().toLowerCase();
-    render();
-  });
-
-  els.ownerFilter.addEventListener("change", (event) => {
-    filters.owner = event.target.value;
-    render();
-  });
-
-  els.priorityFilter.addEventListener("change", (event) => {
-    filters.priority = event.target.value;
-    render();
-  });
-
-  els.resetFilters.addEventListener("click", () => {
-    filters = { search: "", owner: "all", priority: "all", project: "all" };
-    dashboardStatFilter = "";
-    ownerPickerTaskId = "";
-    els.searchInput.value = "";
-    els.ownerFilter.value = "all";
-    els.priorityFilter.value = "all";
     render();
   });
 
@@ -223,10 +197,6 @@ async function saveDataFile() {
 }
 
 function renderFilterOptions() {
-  const ownerOptions = [`<option value="all">すべての担当者</option>`]
-    .concat(state.members.map((member) => `<option value="${escapeHtml(member)}">${escapeHtml(member)}</option>`));
-  els.ownerFilter.innerHTML = ownerOptions.join("");
-  els.ownerFilter.value = filters.owner;
   els.taskOwner.innerHTML = state.members.map((member) => `<option value="${escapeHtml(member)}">${escapeHtml(member)}</option>`).join("");
 }
 
@@ -305,6 +275,7 @@ function renderDashboard() {
 }
 
 function renderBoard() {
+  const previousScrollLeft = els.boardView.querySelector(".board")?.scrollLeft || 0;
   const visible = filteredTasks().filter((task) => task.type === "issue" && task.status !== completedStatus);
   els.boardView.innerHTML = `
     <div class="board">
@@ -321,6 +292,13 @@ function renderBoard() {
   `;
   wireTaskButtons(els.boardView);
   wireBoardDragAndDrop();
+  const board = els.boardView.querySelector(".board");
+  if (board) {
+    board.scrollLeft = previousScrollLeft;
+    requestAnimationFrame(() => {
+      board.scrollLeft = previousScrollLeft;
+    });
+  }
 }
 
 function renderWorkflowTopControl() {
@@ -1187,11 +1165,9 @@ function renameMember(index, rawName) {
   if (existingIndex >= 0 && existingIndex !== index) {
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
     state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
-    if (filters.owner === oldName) filters.owner = newName;
   } else {
     state.members[index] = newName;
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
-    if (filters.owner === oldName) filters.owner = newName;
   }
   render();
 }
@@ -1205,22 +1181,20 @@ function deleteMember(index) {
     return;
   }
   state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
-  if (filters.owner === member) filters.owner = "all";
   render();
 }
 
 function filterTasksByMember(member, targetView = "dashboard") {
-  filters.owner = member;
-  dashboardStatFilter = "";
-  pendingDoneTaskId = "";
-  pendingConvertTaskId = "";
-  ownerPickerTaskId = "";
-  switchView(targetView);
-  render();
+  filterTasksBySearch(member, targetView);
 }
 
 function filterTasksByProject(project, targetView = "dashboard") {
-  filters.project = project;
+  filterTasksBySearch(project, targetView);
+}
+
+function filterTasksBySearch(value, targetView = "dashboard") {
+  filters.search = String(value || "").trim().toLowerCase();
+  els.searchInput.value = String(value || "").trim();
   dashboardStatFilter = "";
   pendingDoneTaskId = "";
   pendingConvertTaskId = "";
@@ -1449,11 +1423,7 @@ function updateTask(id, patch) {
 function filteredTasks() {
   return state.tasks.filter((task) => {
     const haystack = searchableTaskText(task);
-    const matchSearch = !filters.search || haystack.includes(filters.search);
-    const matchOwner = filters.owner === "all" || task.owner === filters.owner;
-    const matchPriority = filters.priority === "all" || task.priority === filters.priority;
-    const matchProject = filters.project === "all" || task.project === filters.project;
-    return matchSearch && matchOwner && matchPriority && matchProject;
+    return !filters.search || haystack.includes(filters.search);
   });
 }
 
