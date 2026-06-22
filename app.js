@@ -37,6 +37,7 @@ let pendingConvertTaskId = "";
 let showAllTodoDone = false;
 let ownerPickerTaskId = "";
 let duePickerTaskId = "";
+let nextEditorTaskId = "";
 let currentTaskAttachments = [];
 let storageQuotaAlertShown = false;
 let undoStack = [];
@@ -182,6 +183,7 @@ function bindEvents() {
   document.addEventListener("click", clearPendingDoneOnOtherClick);
   document.addEventListener("click", closeOwnerPickerOnOtherClick);
   document.addEventListener("click", closeDuePickerOnOtherClick);
+  document.addEventListener("click", closeNextEditorOnOtherClick);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
   document.addEventListener("keydown", handleGlobalShortcuts);
@@ -742,7 +744,6 @@ function compactTaskCard(task) {
       </div>`
     : "";
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
-
   return `
     <article class="todo-card dashboard-compact-card ${urgencyClass}" data-task-id="${task.id}">
       ${doneButton}
@@ -820,6 +821,16 @@ function taskCard(task, enableDrag = false) {
       </div>`
     : "";
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
+  const nextAction = nextEditorTaskId === task.id
+    ? `<div class="next-quick-editor">
+        <textarea data-next-editor="${task.id}" maxlength="220" rows="3" aria-label="次のアクションを編集">${escapeHtml(task.next)}</textarea>
+        <div class="next-editor-actions">
+          <span>Ctrl+Enter で保存</span>
+          <button data-next-cancel="${task.id}" type="button" aria-label="キャンセル" title="キャンセル">×</button>
+          <button class="save" data-next-save="${task.id}" type="button" aria-label="保存" title="保存">✓</button>
+        </div>
+      </div>`
+    : `<button class="next next-edit-button" data-next-open="${task.id}" type="button" title="次のアクションを編集">${escapeHtml(task.next)}</button>`;
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
@@ -830,7 +841,7 @@ function taskCard(task, enableDrag = false) {
         </div>
       </div>
       <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button><span class="meta-right">${stalledBadge}${dueText(task, task.type === "issue" && !isDone(task))}</span></div>
-      <p class="next">${escapeHtml(task.next)}</p>
+      ${nextAction}
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
         <span class="tag-spacer"></span>
@@ -857,6 +868,7 @@ function wireTaskButtons(root) {
       event.stopPropagation();
       ownerPickerTaskId = ownerPickerTaskId === button.dataset.ownerPicker ? "" : button.dataset.ownerPicker;
       duePickerTaskId = "";
+      nextEditorTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
       render();
@@ -868,6 +880,7 @@ function wireTaskButtons(root) {
       event.stopPropagation();
       duePickerTaskId = duePickerTaskId === button.dataset.duePicker ? "" : button.dataset.duePicker;
       ownerPickerTaskId = "";
+      nextEditorTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
       render();
@@ -892,6 +905,53 @@ function wireTaskButtons(root) {
       if (!taskId || !input.value) return;
       updateTask(taskId, { due: input.value }, `「${state.tasks.find((task) => task.id === taskId)?.title || "Issue"}」の期限を変更`);
       duePickerTaskId = "";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-next-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      nextEditorTaskId = button.dataset.nextOpen;
+      ownerPickerTaskId = "";
+      duePickerTaskId = "";
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+      requestAnimationFrame(() => {
+        const textarea = document.querySelector(`[data-next-editor="${CSS.escape(nextEditorTaskId)}"]`);
+        textarea?.focus();
+        if (textarea) textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      });
+    });
+  });
+  root.querySelectorAll("[data-next-editor]").forEach((textarea) => {
+    textarea.addEventListener("click", (event) => event.stopPropagation());
+    textarea.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        nextEditorTaskId = "";
+        render();
+      } else if (event.key === "Enter" && event.ctrlKey && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        saveQuickNextAction(textarea.dataset.nextEditor, textarea.value);
+      }
+    });
+  });
+  root.querySelectorAll("[data-next-save]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const textarea = root.querySelector(`[data-next-editor="${CSS.escape(button.dataset.nextSave)}"]`);
+      saveQuickNextAction(button.dataset.nextSave, textarea?.value || "");
+    });
+  });
+  root.querySelectorAll("[data-next-cancel]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      nextEditorTaskId = "";
       render();
     });
   });
@@ -1509,6 +1569,7 @@ function filterTasksBySearch(value, targetView = "dashboard") {
   pendingConvertTaskId = "";
   ownerPickerTaskId = "";
   duePickerTaskId = "";
+  nextEditorTaskId = "";
   switchView(targetView);
   render();
 }
@@ -1830,6 +1891,21 @@ function closeDuePickerOnOtherClick(event) {
   render();
 }
 
+function closeNextEditorOnOtherClick(event) {
+  if (!nextEditorTaskId || event.target.closest("[data-next-open], [data-next-editor], [data-next-save], [data-next-cancel], .next-quick-editor")) return;
+  nextEditorTaskId = "";
+  render();
+}
+
+function saveQuickNextAction(taskId, value) {
+  const next = String(value || "").trim();
+  if (!taskId || !next) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  updateTask(taskId, { next }, `「${task?.title || "Issue"}」の次のアクションを変更`);
+  nextEditorTaskId = "";
+  render();
+}
+
 function clearPendingDoneConfirmation() {
   clearPendingConfirmations();
 }
@@ -2001,6 +2077,10 @@ function handleGlobalShortcuts(event) {
     }
     if (duePickerTaskId) {
       duePickerTaskId = "";
+      render();
+    }
+    if (nextEditorTaskId) {
+      nextEditorTaskId = "";
       render();
     }
     return;
