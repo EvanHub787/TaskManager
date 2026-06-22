@@ -1746,6 +1746,22 @@ dialog::backdrop {
   font-size: 11px;
 }
 
+.history-row span {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.history-row time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .end-day-row > div {
   min-width: 0;
   flex: 1 1 auto;
@@ -1802,17 +1818,42 @@ kbd {
   font-size: 13px;
 }
 
+#toastMessage {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .toast[hidden] {
   display: none;
 }
 
 .toast button {
+  width: 28px;
+  height: 28px;
   min-height: auto;
+  flex: 0 0 28px;
+  display: inline-grid;
+  place-items: center;
   padding: 0;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: #8ee0b1;
-  font-weight: 700;
+}
+
+.toast button:hover {
+  background: rgba(142, 224, 177, .12);
+}
+
+.toast button svg {
+  width: 17px;
+  height: 17px;
 }
 
 #taskForm {
