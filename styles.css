@@ -1213,6 +1213,46 @@ textarea {
   text-align: right;
 }
 
+.due-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.due-button {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.due-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.due-picker-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: 0;
+  display: block;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(27, 42, 35, .14);
+}
+
+.due-picker-menu input {
+  width: 156px;
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 .due-text.overdue {
   color: var(--danger);
   font-weight: 700;

@@ -36,6 +36,7 @@ let pendingDoneTaskId = "";
 let pendingConvertTaskId = "";
 let showAllTodoDone = false;
 let ownerPickerTaskId = "";
+let duePickerTaskId = "";
 let currentTaskAttachments = [];
 let storageQuotaAlertShown = false;
 let undoStack = [];
@@ -180,6 +181,7 @@ function bindEvents() {
   document.addEventListener("click", closeWorkflowMenuOnOutsideClick, true);
   document.addEventListener("click", clearPendingDoneOnOtherClick);
   document.addEventListener("click", closeOwnerPickerOnOtherClick);
+  document.addEventListener("click", closeDuePickerOnOtherClick);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
   document.addEventListener("keydown", handleGlobalShortcuts);
@@ -827,7 +829,7 @@ function taskCard(task, enableDrag = false) {
           ${ownerMenu}
         </div>
       </div>
-      <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button><span class="meta-right">${stalledBadge}${dueText(task)}</span></div>
+      <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button><span class="meta-right">${stalledBadge}${dueText(task, task.type === "issue" && !isDone(task))}</span></div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
@@ -854,8 +856,42 @@ function wireTaskButtons(root) {
       event.preventDefault();
       event.stopPropagation();
       ownerPickerTaskId = ownerPickerTaskId === button.dataset.ownerPicker ? "" : button.dataset.ownerPicker;
+      duePickerTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-due-picker]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      duePickerTaskId = duePickerTaskId === button.dataset.duePicker ? "" : button.dataset.duePicker;
+      ownerPickerTaskId = "";
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+      if (duePickerTaskId) {
+        requestAnimationFrame(() => {
+          const input = document.querySelector(`[data-due-choice="${CSS.escape(duePickerTaskId)}"]`);
+          input?.focus();
+          try {
+            input?.showPicker?.();
+          } catch {
+            // The inline date input stays available when the browser blocks programmatic opening.
+          }
+        });
+      }
+    });
+  });
+  root.querySelectorAll("[data-due-choice]").forEach((input) => {
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("change", (event) => {
+      event.stopPropagation();
+      const taskId = input.dataset.dueChoice;
+      if (!taskId || !input.value) return;
+      updateTask(taskId, { due: input.value }, `「${state.tasks.find((task) => task.id === taskId)?.title || "Issue"}」の期限を変更`);
+      duePickerTaskId = "";
       render();
     });
   });
@@ -1472,6 +1508,7 @@ function filterTasksBySearch(value, targetView = "dashboard") {
   pendingDoneTaskId = "";
   pendingConvertTaskId = "";
   ownerPickerTaskId = "";
+  duePickerTaskId = "";
   switchView(targetView);
   render();
 }
@@ -1787,6 +1824,12 @@ function closeOwnerPickerOnOtherClick(event) {
   render();
 }
 
+function closeDuePickerOnOtherClick(event) {
+  if (!duePickerTaskId || event.target.closest("[data-due-picker], [data-due-choice], .due-picker-menu")) return;
+  duePickerTaskId = "";
+  render();
+}
+
 function clearPendingDoneConfirmation() {
   clearPendingConfirmations();
 }
@@ -1845,6 +1888,7 @@ function touchTask(task, patch = {}) {
 
 function taskMutationLabel(task, patch) {
   if (patch.owner && patch.owner !== task.owner) return `「${task.title}」の担当者を変更`;
+  if (patch.due && patch.due !== task.due) return `「${task.title}」の期限を変更`;
   if (patch.status === completedStatus || patch.status === todoDoneStatus) return `「${task.title}」を完了`;
   if (patch.status && patch.status !== task.status) return `「${task.title}」を ${patch.status} へ変更`;
   if (Object.prototype.hasOwnProperty.call(patch, "completedAt") && !patch.completedAt) return `「${task.title}」を未完了へ戻す`;
@@ -1953,6 +1997,10 @@ function handleGlobalShortcuts(event) {
     closeActionMenus();
     if (ownerPickerTaskId) {
       ownerPickerTaskId = "";
+      render();
+    }
+    if (duePickerTaskId) {
+      duePickerTaskId = "";
       render();
     }
     return;
@@ -2524,14 +2572,19 @@ function formatDoneDate(dateString) {
   return `${dateString}`;
 }
 
-function dueText(task) {
+function dueText(task, editable = false) {
   const diff = daysUntil(task.due);
   const className = !isDone(task) && diff < 0
     ? "due-text overdue"
     : !isDone(task) && diff <= 1
       ? "due-text soon"
       : "due-text";
-  return `<span class="${className}">${escapeHtml(formatDue(task.due))}</span>`;
+  const label = escapeHtml(formatDue(task.due));
+  if (!editable) return `<span class="${className}">${label}</span>`;
+  const picker = duePickerTaskId === task.id
+    ? `<span class="due-picker-menu"><input type="date" value="${escapeHtml(task.due)}" data-due-choice="${task.id}" aria-label="期限を変更"></span>`
+    : "";
+  return `<span class="due-picker-wrap"><button class="${className} due-button" data-due-picker="${task.id}" type="button" title="期限を変更">${label}</button>${picker}</span>`;
 }
 
 function todayOffset(days) {
