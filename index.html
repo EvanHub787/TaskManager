@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TaskManager</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20260618-search-only">
+  <link rel="stylesheet" href="styles.css?v=20260620-productivity">
 </head>
 
 <body>
@@ -83,6 +83,24 @@
                   <small>JSON から読み込む</small>
                   <input id="importFile" type="file" accept="application/json">
                 </label>
+                <div class="menu-separator"></div>
+                <button id="dailyReportBtn" class="menu-item" type="button">
+                  <span>日報を作成</span>
+                  <small>今日の実績をテキストで出力</small>
+                </button>
+                <button id="historyBtn" class="menu-item" type="button">
+                  <span>操作履歴</span>
+                  <small>最近の変更と取り消し</small>
+                </button>
+                <button id="recoveryBtn" class="menu-item" type="button">
+                  <span>復元ポイント</span>
+                  <small>自動バックアップから復元</small>
+                </button>
+                <button id="shortcutHelpBtn" class="menu-item" type="button">
+                  <span>ショートカット</span>
+                  <small>キーボード操作を確認</small>
+                </button>
+                <div id="storageUsage" class="storage-usage">保存容量を確認中...</div>
               </div>
             </details>
             <button id="addTaskBtn" class="primary-button" type="button">
@@ -98,6 +116,7 @@
             </svg>
             <input id="searchInput" type="search" placeholder="タスク、案件、担当者、次のアクションを検索">
           </div>
+          <div id="searchAssist" class="search-assist" hidden></div>
         </section>
       </div>
 
@@ -166,8 +185,43 @@
     </div>
   </dialog>
 
+  <dialog id="utilityDialog" class="utility-dialog">
+    <div class="utility-shell">
+      <div class="dialog-header">
+        <h3 id="utilityTitle"></h3>
+        <button id="closeUtilityDialog" class="icon-button plain" type="button" aria-label="閉じる">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+        </button>
+      </div>
+      <div id="utilityContent" class="utility-content"></div>
+      <div id="utilityActions" class="dialog-actions"></div>
+    </div>
+  </dialog>
+
+  <dialog id="endDayDialog" class="utility-dialog">
+    <form id="endDayForm" class="utility-shell">
+      <div class="dialog-header">
+        <div><h3>Todo 日次整理</h3><p class="dialog-description">未完了 Todo の翌日の扱いをまとめて決めます。</p></div>
+        <button id="closeEndDayDialog" class="icon-button plain" type="button" aria-label="閉じる">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+        </button>
+      </div>
+      <div id="endDayList" class="end-day-list"></div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button id="cancelEndDayDialog" class="ghost-button" type="button">キャンセル</button>
+        <button class="primary-button" type="submit">反映</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toastMessage"></span>
+    <button id="undoBtn" type="button">取り消す</button>
+  </div>
+
   <datalist id="projectList"></datalist>
-  <script src="app.js?v=20260618-search-only"></script>
+  <script src="app.js?v=20260620-productivity"></script>
 </body>
 
 </html>

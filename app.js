@@ -5,6 +5,13 @@ const todoDoneStatus = "完了";
 const priorities = ["高", "中", "低"];
 const defaultMembers = ["自分", "メンバーA", "メンバーB", "メンバーC", "メンバーD", "メンバーE"];
 const storageKey = "follow-manager-v1";
+const historyKey = "follow-manager-history-v1";
+const databaseName = "task-manager-data";
+const databaseVersion = 1;
+const stateStoreName = "state";
+const recoveryStoreName = "recovery";
+const maxUndoEntries = 30;
+const maxRecoveryPoints = 12;
 
 const sampleTasks = [
   issueTask("Issue 対応フローを確認", "チーム管理", "自分", todayOffset(0), "調査中", "高", "Issue を調査、修正、テスト、MR の流れで管理できるか確認する。", "Issue 画面でフローをカスタマイズできます。"),
@@ -31,6 +38,14 @@ let showAllTodoDone = false;
 let ownerPickerTaskId = "";
 let currentTaskAttachments = [];
 let storageQuotaAlertShown = false;
+let undoStack = [];
+let operationLog = loadOperationLog();
+let lastStateSnapshot = "";
+let lastPersistedSnapshot = "";
+let pendingMutationLabel = "";
+let suppressHistoryCapture = true;
+let toastTimer = null;
+let appDatabase = null;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -42,12 +57,18 @@ const els = {
   peopleView: document.querySelector("#peopleView"),
   todayFocus: document.querySelector("#todayFocus"),
   searchInput: document.querySelector("#searchInput"),
+  searchAssist: document.querySelector("#searchAssist"),
   addTaskBtn: document.querySelector("#addTaskBtn"),
   workflowTopSlot: document.querySelector("#workflowTopSlot"),
   openDataFileBtn: document.querySelector("#openDataFileBtn"),
   saveDataFileBtn: document.querySelector("#saveDataFileBtn"),
   exportBtn: document.querySelector("#exportBtn"),
   importFile: document.querySelector("#importFile"),
+  dailyReportBtn: document.querySelector("#dailyReportBtn"),
+  historyBtn: document.querySelector("#historyBtn"),
+  recoveryBtn: document.querySelector("#recoveryBtn"),
+  shortcutHelpBtn: document.querySelector("#shortcutHelpBtn"),
+  storageUsage: document.querySelector("#storageUsage"),
   dialog: document.querySelector("#taskDialog"),
   form: document.querySelector("#taskForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
@@ -75,15 +96,37 @@ const els = {
   createTodoFromIssueBtn: document.querySelector("#createTodoFromIssueBtn"),
   closeDialog: document.querySelector("#closeDialog"),
   cancelDialog: document.querySelector("#cancelDialog"),
-  projectList: document.querySelector("#projectList")
+  projectList: document.querySelector("#projectList"),
+  utilityDialog: document.querySelector("#utilityDialog"),
+  utilityTitle: document.querySelector("#utilityTitle"),
+  utilityContent: document.querySelector("#utilityContent"),
+  utilityActions: document.querySelector("#utilityActions"),
+  closeUtilityDialog: document.querySelector("#closeUtilityDialog"),
+  endDayDialog: document.querySelector("#endDayDialog"),
+  endDayForm: document.querySelector("#endDayForm"),
+  endDayList: document.querySelector("#endDayList"),
+  closeEndDayDialog: document.querySelector("#closeEndDayDialog"),
+  cancelEndDayDialog: document.querySelector("#cancelEndDayDialog"),
+  toast: document.querySelector("#toast"),
+  toastMessage: document.querySelector("#toastMessage"),
+  undoBtn: document.querySelector("#undoBtn")
 };
 
 bootstrap();
 
-function bootstrap() {
+async function bootstrap() {
   bindEvents();
   fillStaticSelects();
+  els.addTaskBtn.title = "新規項目を追加 (N)";
+  els.searchInput.title = "検索へ移動 (/) · 例: 担当:自分 期限:今日";
+  els.closeDialog.title = "閉じる (Esc)";
+  els.closeUtilityDialog.title = "閉じる (Esc)";
+  els.form.querySelector("button[type='submit']").title = "保存 (Ctrl+Enter)";
+  lastStateSnapshot = serializeState(state);
   render();
+  suppressHistoryCapture = false;
+  await initializeIndexedDb();
+  updateStorageUsage();
 }
 
 function bindEvents() {
@@ -92,9 +135,12 @@ function bindEvents() {
   });
 
   els.searchInput.addEventListener("input", (event) => {
-    filters.search = event.target.value.trim().toLowerCase();
+    filters.search = event.target.value.trim();
     render();
   });
+  els.searchInput.addEventListener("focus", renderSearchAssist);
+  els.searchInput.addEventListener("click", renderSearchAssist);
+  els.searchInput.addEventListener("blur", () => setTimeout(renderSearchAssist, 120));
 
   els.addTaskBtn.addEventListener("click", () => openTaskDialog());
   els.openDataFileBtn.addEventListener("click", openDataFile);
@@ -105,6 +151,15 @@ function bindEvents() {
   els.createTodoFromIssueBtn.addEventListener("click", createTodoFromCurrentIssue);
   els.exportBtn.addEventListener("click", exportData);
   els.importFile.addEventListener("change", importData);
+  els.dailyReportBtn.addEventListener("click", openDailyReport);
+  els.historyBtn.addEventListener("click", openHistoryDialog);
+  els.recoveryBtn.addEventListener("click", openRecoveryDialog);
+  els.shortcutHelpBtn.addEventListener("click", openShortcutHelp);
+  els.closeUtilityDialog.addEventListener("click", closeUtilityDialog);
+  els.endDayForm.addEventListener("submit", applyEndDayReview);
+  els.closeEndDayDialog.addEventListener("click", () => els.endDayDialog.close());
+  els.cancelEndDayDialog.addEventListener("click", () => els.endDayDialog.close());
+  els.undoBtn.addEventListener("click", undoLastChange);
   els.taskLink.addEventListener("input", () => els.taskLink.setCustomValidity(""));
   els.taskNext.addEventListener("input", autoResizeTaskNext);
   els.taskImages.addEventListener("change", handleTaskImageFiles);
@@ -127,6 +182,7 @@ function bindEvents() {
   document.addEventListener("click", closeOwnerPickerOnOtherClick);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
+  document.addEventListener("keydown", handleGlobalShortcuts);
 }
 
 function fillStaticSelects() {
@@ -144,6 +200,7 @@ function fillStatusSelect(type, selected) {
 function render() {
   state = migrateState(state);
   syncMembersFromTasks();
+  captureStateChange();
   renderWorkflowTopControl();
   renderFilterOptions();
   renderProjectList();
@@ -153,6 +210,8 @@ function render() {
   renderTodo();
   renderProjects();
   renderPeople();
+  renderSearchAssist();
+  wireClearSearchButtons();
   saveState();
 }
 
@@ -174,6 +233,7 @@ async function openDataFile() {
     const imported = JSON.parse(await file.text());
     validateImportedData(imported);
     dataFileHandle = handle;
+    markStateMutation("データファイルを読み込み");
     state = migrateState(imported);
     render();
     alert("データファイルを開きました。変更後は「データファイルへ保存」を押してください。");
@@ -259,6 +319,7 @@ function renderDashboard() {
   const visible = filteredTasks();
   const openTasks = visible.filter((task) => !isDone(task));
   const overdue = openTasks.filter((task) => daysUntil(task.due) < 0);
+  const stalled = openTasks.filter(isTaskStalled);
   const issues = openTasks.filter((task) => task.type === "issue");
   const todos = openTasks.filter((task) => task.type === "todo");
   const statItems = [
@@ -266,7 +327,8 @@ function renderDashboard() {
     { key: "issue", label: "対応中 Issue", tasks: issues },
     { key: "todo", label: "Todo", tasks: todos },
     { key: "overdue", label: "期限超過", tasks: overdue },
-    { key: "done", label: "完了", tasks: visible.filter(isDone) }
+    { key: "done", label: "完了", tasks: visible.filter(isDone) },
+    { key: "stalled", label: "停滞 Issue", tasks: stalled }
   ];
   const selectedStat = statItems.find((item) => item.key === dashboardStatFilter);
   const selectedTasks = selectedStat
@@ -300,7 +362,7 @@ function renderBoard() {
         return `
           <div class="column" data-status="${escapeHtml(status)}">
             <div class="column-title"><span>${escapeHtml(status)}</span><span class="tag">${tasks.length}</span></div>
-            <div class="cards" data-drop-status="${escapeHtml(status)}">${tasks.length ? tasks.map((task) => taskCard(task, true)).join("") : `<div class="empty">Issue はありません</div>`}</div>
+            <div class="cards" data-drop-status="${escapeHtml(status)}">${tasks.length ? tasks.map((task) => taskCard(task, true)).join("") : emptyState("Issue はありません")}</div>
           </div>
         `;
       }).join("")}
@@ -369,12 +431,13 @@ function renderTodo() {
   });
 
   els.todoView.innerHTML = `
-    ${todoSection("To-do List", open, `<span class="tag">${open.length}</span>`, true)}
+    ${todoSection("To-do List", open, `<div class="section-actions"><button class="section-link" data-end-day-review type="button">日次整理</button><span class="tag">${open.length}</span></div>`, true)}
     ${showAllTodoDone
       ? todoDoneHistorySection("完了", recentDone)
       : todoSection("完了", todayDone, `<button class="section-link" data-todo-done-view="all" type="button">すべての完了を見る &gt;</button>`)}
   `;
   wireTodoDoneViewButtons();
+  els.todoView.querySelector("[data-end-day-review]")?.addEventListener("click", openEndDayReview);
   wireTaskButtons(els.todoView);
   wireTodoDragAndDrop();
 }
@@ -399,14 +462,18 @@ function renderProjects() {
         <td>${high}</td>
         <td>${overdue}</td>
         <td>${progress}%</td>
+        <td><button class="tiny-button" data-project-detail="${escapeHtml(project)}" type="button">詳細</button></td>
       </tr>
     `;
   }).join("");
 
   els.projectsView.innerHTML = rows
-    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>未完了</th><th>Issue</th><th>Todo</th><th>高優先度</th><th>期限超過</th><th>完了率</th></tr></thead><tbody>${rows}</tbody></table>`
-    : `<div class="empty">案件はありません</div>`;
+    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>未完了</th><th>Issue</th><th>Todo</th><th>高優先度</th><th>期限超過</th><th>完了率</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    : emptyState("案件はありません");
   wireTaskButtons(els.projectsView);
+  els.projectsView.querySelectorAll("[data-project-detail]").forEach((button) => {
+    button.addEventListener("click", () => openProjectDetail(button.dataset.projectDetail));
+  });
 }
 
 function renderPeople() {
@@ -455,24 +522,184 @@ function renderPeople() {
   wireMemberButtons();
 }
 
+function openDailyReport() {
+  const today = todayOffset(0);
+  const completed = state.tasks.filter((task) => isDone(task) && completionDate(task) === today).sort(sortByCompletedAt);
+  const openTodos = state.tasks.filter((task) => task.type === "todo" && !isDone(task)).sort(sortByBoardOrder);
+  const activeIssues = state.tasks.filter((task) => task.type === "issue" && !isDone(task)).sort(sortByUrgency);
+  const risks = activeIssues.filter((task) => daysUntil(task.due) < 0 || isTaskStalled(task));
+  const report = [
+    `日報 ${today}`,
+    "",
+    "【今日の完了】",
+    ...reportTaskLines(completed, "完了した作業はありません。"),
+    "",
+    "【対応中】",
+    ...reportTaskLines(activeIssues, "対応中の Issue はありません。"),
+    "",
+    "【次の予定】",
+    ...reportTaskLines(openTodos, "未完了 Todo はありません。"),
+    "",
+    "【期限超過・停滞】",
+    ...reportTaskLines(risks, "該当項目はありません。")
+  ].join("\n");
+
+  openUtilityDialog("日報を作成", `
+    <p class="dialog-description">今日の完了内容と現在の作業状況をテキストでまとめています。</p>
+    <textarea id="dailyReportText" class="report-text" rows="18" readonly>${escapeHtml(report)}</textarea>
+  `, `
+    <button class="ghost-button" data-utility-close type="button">閉じる</button>
+    <span class="spacer"></span>
+    <button class="primary-button" id="copyDailyReport" type="button">コピー</button>
+  `);
+  document.querySelector("#copyDailyReport").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      showToast("日報をコピーしました。", false);
+    } catch {
+      const textarea = document.querySelector("#dailyReportText");
+      textarea.select();
+      document.execCommand("copy");
+      showToast("日報をコピーしました。", false);
+    }
+  });
+}
+
+function reportTaskLines(tasks, emptyMessage) {
+  return tasks.length
+    ? tasks.map((task) => {
+      const issue = extractIssueNumber(task.link);
+      const prefix = issue ? `#${issue} ` : "";
+      const stateText = isDone(task) ? "" : ` (${task.status} / ${task.owner})`;
+      return `・${prefix}${task.title}: ${task.next}${stateText}`;
+    })
+    : [`・${emptyMessage}`];
+}
+
+function openEndDayReview() {
+  const todos = state.tasks.filter((task) => task.type === "todo" && !isDone(task)).sort(sortByBoardOrder);
+  els.endDayList.innerHTML = todos.length
+    ? todos.map((task) => `
+      <div class="end-day-row">
+        <div><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.next)}</span></div>
+        <select name="end-day-${escapeHtml(task.id)}" aria-label="${escapeHtml(task.title)}の処理">
+          <option value="keep">変更しない</option>
+          <option value="tomorrow">明日に延長</option>
+          <option value="done">完了</option>
+          <option value="delete">削除</option>
+        </select>
+      </div>
+    `).join("")
+    : `<div class="empty">整理する Todo はありません</div>`;
+  els.endDayDialog.showModal();
+}
+
+function applyEndDayReview(event) {
+  event.preventDefault();
+  const decisions = [...els.endDayList.querySelectorAll("select")]
+    .map((select) => ({ id: select.name.replace("end-day-", ""), action: select.value }))
+    .filter((decision) => decision.action !== "keep");
+  if (!decisions.length) {
+    els.endDayDialog.close();
+    return;
+  }
+  markStateMutation(`Todo 日次整理 (${decisions.length}件)`);
+  const deleteIds = new Set(decisions.filter((decision) => decision.action === "delete").map((decision) => decision.id));
+  const actionById = new Map(decisions.map((decision) => [decision.id, decision.action]));
+  state.tasks = state.tasks.filter((task) => !deleteIds.has(task.id)).map((task) => {
+    const action = actionById.get(task.id);
+    if (action === "tomorrow") return touchTask(task, { due: todayOffset(1) });
+    if (action === "done") return touchTask(task, { status: todoDoneStatus, completedAt: todayOffset(0) });
+    return task;
+  });
+  els.endDayDialog.close();
+  render();
+}
+
+function openProjectDetail(project) {
+  const tasks = state.tasks.filter((task) => task.project === project);
+  const open = tasks.filter((task) => !isDone(task)).sort(sortByUrgency);
+  const done = tasks.filter(isDone).sort(sortByCompletedAt);
+  const issues = open.filter((task) => task.type === "issue");
+  const todos = open.filter((task) => task.type === "todo");
+  const risks = open.filter((task) => daysUntil(task.due) < 0 || isTaskStalled(task));
+  openUtilityDialog(`${project} 詳細`, `
+    <div class="detail-stats">
+      ${detailStat("未完了", open.length)}${detailStat("Issue", issues.length)}${detailStat("Todo", todos.length)}${detailStat("リスク", risks.length)}
+    </div>
+    ${utilityTaskSection("対応中", open)}
+    ${utilityTaskSection("最近の完了", done.slice(0, 8))}
+  `, `<button class="ghost-button" data-utility-close type="button">閉じる</button>`);
+  els.utilityContent.querySelectorAll("[data-utility-task]").forEach((button) => {
+    button.addEventListener("click", () => {
+      closeUtilityDialog();
+      openTaskDialog(button.dataset.utilityTask);
+    });
+  });
+}
+
+function detailStat(label, value) {
+  return `<div><span>${label}</span><strong>${value}</strong></div>`;
+}
+
+function utilityTaskSection(title, tasks) {
+  return `
+    <section class="utility-task-section"><h4>${title}</h4>
+      <div class="utility-task-list">${tasks.length ? tasks.map((task) => `
+        <button data-utility-task="${task.id}" type="button">
+          <strong>${escapeHtml(task.title)}</strong>
+          <span>${escapeHtml(task.owner)} · ${escapeHtml(task.status)} · ${escapeHtml(formatDue(task.due))}</span>
+        </button>`).join("") : `<div class="empty">項目はありません</div>`}
+      </div>
+    </section>`;
+}
+
+function openUtilityDialog(title, content, actions = "") {
+  closeActionMenus();
+  els.utilityTitle.textContent = title;
+  els.utilityContent.innerHTML = content;
+  els.utilityActions.innerHTML = actions;
+  els.utilityActions.querySelectorAll("[data-utility-close]").forEach((button) => button.addEventListener("click", closeUtilityDialog));
+  els.utilityDialog.showModal();
+}
+
+function closeUtilityDialog() {
+  if (els.utilityDialog.open) els.utilityDialog.close();
+}
+
+function closeActionMenus() {
+  document.querySelectorAll("details.action-menu[open]").forEach((menu) => { menu.open = false; });
+}
+
+function openShortcutHelp() {
+  openUtilityDialog("ショートカット", `
+    <div class="shortcut-list">
+      <div><span>新規項目</span><span><kbd>N</kbd></span></div>
+      <div><span>検索へ移動</span><span><kbd>/</kbd></span></div>
+      <div><span>項目を保存</span><span><kbd>Ctrl</kbd> + <kbd>Enter</kbd></span></div>
+      <div><span>閉じる・メニュー解除</span><span><kbd>Esc</kbd></span></div>
+    </div>
+  `, `<button class="ghost-button" data-utility-close type="button">閉じる</button>`);
+}
+
 function taskSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`) {
   return `
     <div class="section-title"><h3>${title}</h3>${action}</div>
-    <div class="cards">${tasks.length ? tasks.map((task) => taskCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
+    <div class="cards">${tasks.length ? tasks.map((task) => taskCard(task)).join("") : emptyState("項目はありません")}</div>
   `;
 }
 
 function compactTaskSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`) {
   return `
     <div class="section-title compact-section-title"><h3>${title}</h3>${action}</div>
-    <div class="todo-list dashboard-compact-list">${tasks.length ? tasks.map((task) => compactTaskCard(task)).join("") : `<div class="empty">項目はありません</div>`}</div>
+    <div class="todo-list dashboard-compact-list">${tasks.length ? tasks.map((task) => compactTaskCard(task)).join("") : emptyState("項目はありません")}</div>
   `;
 }
 
 function todoSection(title, tasks, action = `<span class="tag">${tasks.length}</span>`, enableDrag = false) {
   return `
     <div class="section-title compact-section-title"><h3>${title}</h3>${action}</div>
-    <div class="todo-list" ${enableDrag ? `data-todo-drop-zone="open"` : ""}>${tasks.length ? tasks.map((task) => todoCard(task, enableDrag)).join("") : `<div class="empty">項目はありません</div>`}</div>
+    <div class="todo-list" ${enableDrag ? `data-todo-drop-zone="open"` : ""}>${tasks.length ? tasks.map((task) => todoCard(task, enableDrag)).join("") : emptyState("項目はありません")}</div>
   `;
 }
 
@@ -512,6 +739,7 @@ function compactTaskCard(task) {
         `).join("")}
       </div>`
     : "";
+  const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
 
   return `
     <article class="todo-card dashboard-compact-card ${urgencyClass}" data-task-id="${task.id}">
@@ -529,6 +757,7 @@ function compactTaskCard(task) {
           <p>${escapeHtml(task.next)}</p>
           <button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>
           ${dueText(task)}
+          ${stalledBadge}
         </div>
       </div>
     </article>
@@ -588,6 +817,7 @@ function taskCard(task, enableDrag = false) {
         `).join("")}
       </div>`
     : "";
+  const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
@@ -597,7 +827,7 @@ function taskCard(task, enableDrag = false) {
           ${ownerMenu}
         </div>
       </div>
-      <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>${dueText(task)}</div>
+      <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button><span class="meta-right">${stalledBadge}${dueText(task)}</span></div>
       <p class="next">${escapeHtml(task.next)}</p>
       <div class="tags">
         <span class="tag ${priorityClass}">${task.priority}</span>
@@ -891,9 +1121,10 @@ function moveIssueTask(taskId, targetStatus, beforeId) {
   const beforeIndex = beforeId ? targetTasks.findIndex((item) => item.id === beforeId) : -1;
   const insertIndex = beforeIndex >= 0 ? beforeIndex : targetTasks.length;
   targetTasks.splice(insertIndex, 0, { ...task, status: targetStatus });
+  markStateMutation(sourceStatus === targetStatus ? "Issue を並べ替え" : `Issue を ${targetStatus} へ移動`);
 
   state.tasks = state.tasks.map((item) => {
-    if (item.id === taskId) return { ...item, status: targetStatus, order: insertIndex };
+    if (item.id === taskId) return touchTask(item, { status: targetStatus, order: insertIndex });
     if (item.type === "issue" && item.status === targetStatus) {
       const index = targetTasks.findIndex((targetTask) => targetTask.id === item.id);
       return index >= 0 ? { ...item, order: index } : item;
@@ -944,6 +1175,7 @@ function moveTodoTask(taskId, beforeId) {
   const insertIndex = beforeIndex >= 0 ? beforeIndex : targetTasks.length;
   targetTasks.splice(insertIndex, 0, task);
   const indexById = new Map(targetTasks.map((item, index) => [item.id, index]));
+  markStateMutation("Todo を並べ替え");
   state.tasks = state.tasks.map((item) => indexById.has(item.id) ? { ...item, order: indexById.get(item.id) } : item);
   render();
 }
@@ -1087,6 +1319,7 @@ function addWorkflowStep(rawName) {
     alert("このフローステップはすでに存在します。");
     return;
   }
+  markStateMutation(`フローステップ「${name}」を追加`);
   state.workflow.push(name);
   keepWorkflowMenuOpen = true;
   render();
@@ -1106,6 +1339,7 @@ function renameWorkflowStep(index, rawName) {
     renderBoard();
     return;
   }
+  markStateMutation(`フローステップを「${newName}」へ変更`);
   state.workflow[index] = newName;
   state.tasks = state.tasks.map((task) => task.type === "issue" && task.status === oldName ? { ...task, status: newName } : task);
   keepWorkflowMenuOpen = true;
@@ -1120,6 +1354,7 @@ function deleteWorkflowStep(index) {
     alert("このステップにはまだ Issue があります。先に移動または完了してください。");
     return;
   }
+  markStateMutation(`フローステップ「${step}」を削除`);
   state.workflow = state.workflow.filter((_, stepIndex) => stepIndex !== index);
   keepWorkflowMenuOpen = true;
   render();
@@ -1134,6 +1369,7 @@ function moveWorkflowStep(fromIndex, beforeIndex) {
   const [movedStep] = workflow.splice(fromIndex, 1);
   const insertIndex = fromIndex < beforeIndex ? beforeIndex - 1 : beforeIndex;
   workflow.splice(insertIndex, 0, movedStep);
+  markStateMutation("フローを並べ替え");
   state.workflow = workflow;
   keepWorkflowMenuOpen = true;
   render();
@@ -1180,6 +1416,7 @@ function addMember(rawName) {
     alert("このメンバーはすでに存在します。");
     return;
   }
+  markStateMutation(`メンバー「${name}」を追加`);
   state.members.push(name);
   render();
 }
@@ -1196,9 +1433,11 @@ function renameMember(index, rawName) {
 
   const existingIndex = state.members.findIndex((member) => member === newName);
   if (existingIndex >= 0 && existingIndex !== index) {
+    markStateMutation(`担当者を「${newName}」へ統合`);
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
     state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
   } else {
+    markStateMutation(`メンバーを「${newName}」へ変更`);
     state.members[index] = newName;
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
   }
@@ -1213,20 +1452,21 @@ function deleteMember(index) {
     alert("このメンバーにはまだ項目があります。先に担当者を変更してください。");
     return;
   }
+  markStateMutation(`メンバー「${member}」を削除`);
   state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
   render();
 }
 
 function filterTasksByMember(member, targetView = "dashboard") {
-  filterTasksBySearch(member, targetView);
+  filterTasksBySearch(`担当:"${member}"`, targetView);
 }
 
 function filterTasksByProject(project, targetView = "dashboard") {
-  filterTasksBySearch(project, targetView);
+  filterTasksBySearch(`案件:"${project}"`, targetView);
 }
 
 function filterTasksBySearch(value, targetView = "dashboard") {
-  filters.search = String(value || "").trim().toLowerCase();
+  filters.search = String(value || "").trim();
   els.searchInput.value = String(value || "").trim();
   dashboardStatFilter = "";
   pendingDoneTaskId = "";
@@ -1281,6 +1521,7 @@ function switchView(view) {
   document.querySelector(`#${view}View`).classList.add("active");
   els.pageTitle.textContent = titles[view];
   renderWorkflowTopControl();
+  renderSearchAssist();
 }
 
 function openTaskDialog(id, overrides = {}) {
@@ -1509,13 +1750,17 @@ function saveTask(event) {
     link,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
     notes: els.taskNotes.value.trim(),
-    attachments: normalizeAttachments(currentTaskAttachments)
+    attachments: normalizeAttachments(currentTaskAttachments),
+    createdAt: existingTask?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
   const index = state.tasks.findIndex((item) => item.id === id);
   if (index >= 0) {
+    markStateMutation(`「${task.title}」を更新`);
     state.tasks[index] = task;
   } else {
+    markStateMutation(`「${task.title}」を追加`);
     state.tasks.unshift(task);
   }
 
@@ -1580,20 +1825,155 @@ function submitTaskDialogWithShortcut(event) {
 function deleteCurrentTask() {
   const id = els.taskId.value;
   if (!id) return;
+  const task = state.tasks.find((item) => item.id === id);
+  markStateMutation(`「${task?.title || "項目"}」を削除`);
   state.tasks = state.tasks.filter((task) => task.id !== id);
   closeTaskDialog();
   render();
 }
 
-function updateTask(id, patch) {
-  state.tasks = state.tasks.map((task) => task.id === id ? { ...task, ...patch } : task);
+function updateTask(id, patch, label = "") {
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task) return;
+  markStateMutation(label || taskMutationLabel(task, patch));
+  state.tasks = state.tasks.map((item) => item.id === id ? touchTask(item, patch) : item);
+}
+
+function touchTask(task, patch = {}) {
+  return { ...task, ...patch, updatedAt: new Date().toISOString() };
+}
+
+function taskMutationLabel(task, patch) {
+  if (patch.owner && patch.owner !== task.owner) return `「${task.title}」の担当者を変更`;
+  if (patch.status === completedStatus || patch.status === todoDoneStatus) return `「${task.title}」を完了`;
+  if (patch.status && patch.status !== task.status) return `「${task.title}」を ${patch.status} へ変更`;
+  if (Object.prototype.hasOwnProperty.call(patch, "completedAt") && !patch.completedAt) return `「${task.title}」を未完了へ戻す`;
+  return `「${task.title}」を更新`;
 }
 
 function filteredTasks() {
-  return state.tasks.filter((task) => {
-    const haystack = searchableTaskText(task);
-    return !filters.search || haystack.includes(filters.search);
-  });
+  const criteria = parseSearchQuery(filters.search);
+  if (!criteria.length) return [...state.tasks];
+  return state.tasks.filter((task) => criteria.every((criterion) => matchesSearchCriterion(task, criterion)));
+}
+
+function parseSearchQuery(query) {
+  const aliases = {
+    "担当": "owner", "担当者": "owner", owner: "owner",
+    "案件": "project", project: "project",
+    "種別": "type", type: "type",
+    "期限": "due", due: "due",
+    "状態": "status", "ステータス": "status", status: "status",
+    "優先": "priority", "優先度": "priority", priority: "priority",
+    "完了": "done", done: "done"
+  };
+  return (String(query || "").match(/(?:[^\s\"]+|\"[^\"]*\")+/g) || []).map((rawToken) => {
+    const token = rawToken.replace(/^\"|\"$/g, "");
+    const separator = token.search(/[:：]/);
+    if (separator <= 0) return { key: "text", value: token.toLowerCase(), label: token };
+    const rawKey = token.slice(0, separator).toLowerCase();
+    const value = token.slice(separator + 1).replace(/^\"|\"$/g, "").trim();
+    const key = aliases[rawKey];
+    return key && value
+      ? { key, value: value.toLowerCase(), label: `${token.slice(0, separator)}:${value}` }
+      : { key: "text", value: token.toLowerCase(), label: token };
+  }).filter((criterion) => criterion.value);
+}
+
+function matchesSearchCriterion(task, criterion) {
+  const value = criterion.value;
+  if (criterion.key === "text") return searchableTaskText(task).includes(value);
+  if (criterion.key === "owner") return task.owner.toLowerCase().includes(value);
+  if (criterion.key === "project") return task.project.toLowerCase().includes(value);
+  if (criterion.key === "type") return taskLabel(task).toLowerCase() === value || task.type === value;
+  if (criterion.key === "priority") return task.priority.toLowerCase() === value.replace(/優先度|優先/g, "");
+  if (criterion.key === "done") {
+    const wantsDone = ["true", "yes", "1", "済", "完了"].includes(value);
+    const wantsOpen = ["false", "no", "0", "未完了"].includes(value);
+    return wantsDone ? isDone(task) : wantsOpen ? !isDone(task) : searchableTaskText(task).includes(value);
+  }
+  if (criterion.key === "status") {
+    if (["停滞", "stalled"].includes(value)) return isTaskStalled(task);
+    return task.status.toLowerCase().includes(value);
+  }
+  if (criterion.key === "due") return matchesDueSearch(task, value);
+  return true;
+}
+
+function matchesDueSearch(task, value) {
+  const diff = daysUntil(task.due);
+  if (["今日", "本日", "today"].includes(value)) return diff === 0;
+  if (["明日", "tomorrow"].includes(value)) return diff === 1;
+  if (["期限超過", "超過", "overdue"].includes(value)) return !isDone(task) && diff < 0;
+  if (["今週", "week"].includes(value)) return diff >= 0 && diff <= 7;
+  return task.due.toLowerCase().includes(value);
+}
+
+function renderSearchAssist() {
+  const criteria = parseSearchQuery(filters.search);
+  const showExamples = !criteria.length && document.activeElement === els.searchInput;
+  const ignoresSearch = ["projects", "people"].includes(currentView());
+  els.searchAssist.hidden = !criteria.length && !showExamples;
+  if (!criteria.length) {
+    els.searchAssist.innerHTML = showExamples ? `
+      <span class="search-assist-label">条件検索</span>
+      ${["担当:自分", "期限:今日", "期限:期限超過", "状態:停滞", "種別:Todo"].map((example) => `<button class="search-chip search-example" data-search-example="${example}" type="button">${example}</button>`).join("")}
+    ` : "";
+    els.searchAssist.querySelectorAll("[data-search-example]").forEach((button) => {
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => filterTasksBySearch(button.dataset.searchExample, currentView()));
+    });
+    return;
+  }
+  els.searchAssist.innerHTML = `
+    <span class="search-assist-label">検索条件</span>
+    ${criteria.map((criterion) => `<span class="search-chip">${escapeHtml(criterion.label)}</span>`).join("")}
+    <button class="search-clear" type="button">クリア</button>
+    <span class="search-count">${ignoresSearch ? "この画面は常に全件表示" : `${filteredTasks().length} 件`}</span>
+  `;
+  els.searchAssist.querySelector(".search-clear").addEventListener("click", clearSearch);
+}
+
+function clearSearch() {
+  filters.search = "";
+  els.searchInput.value = "";
+  dashboardStatFilter = "";
+  render();
+  els.searchInput.focus();
+}
+
+function wireClearSearchButtons() {
+  document.querySelectorAll("[data-clear-search]").forEach((button) => button.addEventListener("click", clearSearch));
+}
+
+function handleGlobalShortcuts(event) {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const isTyping = Boolean(target?.closest("input, textarea, select, [contenteditable='true']"));
+  if (event.key === "Escape") {
+    closeActionMenus();
+    if (ownerPickerTaskId) {
+      ownerPickerTaskId = "";
+      render();
+    }
+    return;
+  }
+  if (document.querySelector("dialog[open]")) return;
+  if (isTyping || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "/") {
+    event.preventDefault();
+    els.searchInput.focus();
+    els.searchInput.select();
+    renderSearchAssist();
+  } else if (event.key.toLowerCase() === "n") {
+    event.preventDefault();
+    openTaskDialog();
+  }
+}
+
+function emptyState(defaultMessage) {
+  return filters.search
+    ? `<div class="empty search-empty"><strong>検索条件に一致する項目はありません</strong><span>${escapeHtml(filters.search)}</span><button class="tiny-button" data-clear-search type="button">検索をクリア</button></div>`
+    : `<div class="empty">${escapeHtml(defaultMessage)}</div>`;
 }
 
 function searchableTaskText(task) {
@@ -1641,6 +2021,7 @@ function importData(event) {
     try {
       const imported = JSON.parse(reader.result);
       validateImportedData(imported);
+      markStateMutation("JSON データをインポート");
       state = migrateState(imported);
       dataFileHandle = null;
       render();
@@ -1658,6 +2039,219 @@ function validateImportedData(imported) {
   }
 }
 
+function markStateMutation(label) {
+  pendingMutationLabel = label || "データを更新";
+}
+
+function captureStateChange() {
+  const currentSnapshot = serializeState(state);
+  if (!lastStateSnapshot) {
+    lastStateSnapshot = currentSnapshot;
+    pendingMutationLabel = "";
+    return;
+  }
+  if (currentSnapshot === lastStateSnapshot) {
+    pendingMutationLabel = "";
+    return;
+  }
+  const label = pendingMutationLabel || "データを更新";
+  if (!suppressHistoryCapture) {
+    undoStack.push({ label, timestamp: new Date().toISOString(), state: JSON.parse(lastStateSnapshot) });
+    if (undoStack.length > maxUndoEntries) undoStack.shift();
+    operationLog.unshift({ label, timestamp: new Date().toISOString() });
+    operationLog = operationLog.slice(0, 50);
+    saveOperationLog();
+    createRecoveryPoint(label, state);
+    showToast(`${label}しました。`, true);
+  }
+  lastStateSnapshot = currentSnapshot;
+  pendingMutationLabel = "";
+}
+
+function serializeState(value) {
+  return JSON.stringify(value);
+}
+
+function undoLastChange() {
+  const entry = undoStack.pop();
+  if (!entry) return;
+  suppressHistoryCapture = true;
+  state = migrateState(entry.state);
+  lastStateSnapshot = serializeState(state);
+  suppressHistoryCapture = false;
+  operationLog.unshift({ label: `取り消し: ${entry.label}`, timestamp: new Date().toISOString() });
+  operationLog = operationLog.slice(0, 50);
+  saveOperationLog();
+  render();
+  showToast(`${entry.label}を取り消しました。`, false);
+}
+
+function showToast(message, canUndo = true) {
+  clearTimeout(toastTimer);
+  els.toastMessage.textContent = message;
+  els.undoBtn.hidden = !canUndo || !undoStack.length;
+  els.toast.hidden = false;
+  toastTimer = setTimeout(() => { els.toast.hidden = true; }, 5200);
+}
+
+function loadOperationLog() {
+  try {
+    const log = JSON.parse(localStorage.getItem(historyKey));
+    return Array.isArray(log) ? log : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOperationLog() {
+  try {
+    localStorage.setItem(historyKey, JSON.stringify(operationLog));
+  } catch {
+    // History metadata is optional; task data remains in IndexedDB.
+  }
+}
+
+function openHistoryDialog() {
+  const rows = operationLog.length ? operationLog.map((entry) => `
+    <div class="history-row"><span>${escapeHtml(entry.label)}</span><time>${escapeHtml(formatTimestamp(entry.timestamp))}</time></div>
+  `).join("") : `<div class="empty">操作履歴はありません</div>`;
+  openUtilityDialog("操作履歴", `<div class="history-list">${rows}</div>`, `
+    <button class="ghost-button" data-utility-close type="button">閉じる</button>
+    <span class="spacer"></span>
+    <button class="primary-button" id="historyUndoBtn" type="button" ${undoStack.length ? "" : "disabled"}>直前の操作を取り消す</button>
+  `);
+  document.querySelector("#historyUndoBtn").addEventListener("click", () => {
+    closeUtilityDialog();
+    undoLastChange();
+  });
+}
+
+function formatTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  return new Intl.DateTimeFormat("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+async function initializeIndexedDb() {
+  if (!("indexedDB" in window)) return;
+  try {
+    appDatabase = await openAppDatabase();
+    const saved = await idbGet(stateStoreName, "current");
+    if (saved?.state?.tasks) {
+      suppressHistoryCapture = true;
+      state = migrateState(saved.state);
+      lastStateSnapshot = serializeState(state);
+      render();
+      suppressHistoryCapture = false;
+    } else {
+      await persistStateToIndexedDb();
+      await createRecoveryPoint("初期データ", state);
+    }
+  } catch {
+    appDatabase = null;
+  }
+}
+
+function openAppDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(databaseName, databaseVersion);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(stateStoreName)) database.createObjectStore(stateStoreName, { keyPath: "id" });
+      if (!database.objectStoreNames.contains(recoveryStoreName)) database.createObjectStore(recoveryStoreName, { keyPath: "id" });
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function idbStore(storeName, mode = "readonly") {
+  return appDatabase.transaction(storeName, mode).objectStore(storeName);
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function idbGet(storeName, key) {
+  return idbRequest(idbStore(storeName).get(key));
+}
+
+function idbGetAll(storeName) {
+  return idbRequest(idbStore(storeName).getAll());
+}
+
+function idbPut(storeName, value) {
+  return idbRequest(idbStore(storeName, "readwrite").put(value));
+}
+
+function idbDelete(storeName, key) {
+  return idbRequest(idbStore(storeName, "readwrite").delete(key));
+}
+
+async function persistStateToIndexedDb() {
+  if (!appDatabase) return;
+  await idbPut(stateStoreName, { id: "current", state, updatedAt: new Date().toISOString() });
+}
+
+async function createRecoveryPoint(label, pointState) {
+  if (!appDatabase) return;
+  try {
+    await idbPut(recoveryStoreName, {
+      id: crypto.randomUUID(),
+      label,
+      timestamp: new Date().toISOString(),
+      state: JSON.parse(serializeState(pointState))
+    });
+    const points = (await idbGetAll(recoveryStoreName)).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    await Promise.all(points.slice(maxRecoveryPoints).map((point) => idbDelete(recoveryStoreName, point.id)));
+  } catch {
+    // Recovery points must never block the primary save.
+  }
+}
+
+async function openRecoveryDialog() {
+  closeActionMenus();
+  const points = appDatabase ? (await idbGetAll(recoveryStoreName)).sort((a, b) => b.timestamp.localeCompare(a.timestamp)) : [];
+  const rows = points.length ? points.map((point) => `
+    <div class="recovery-row">
+      <div><strong>${escapeHtml(point.label)}</strong><time>${escapeHtml(formatTimestamp(point.timestamp))}</time></div>
+      <button class="tiny-button" data-restore-point="${point.id}" type="button">復元</button>
+    </div>
+  `).join("") : `<div class="empty">復元ポイントはありません</div>`;
+  openUtilityDialog("復元ポイント", `<p class="dialog-description">直近 ${maxRecoveryPoints} 件の変更後データを保存しています。</p><div class="recovery-list">${rows}</div>`, `<button class="ghost-button" data-utility-close type="button">閉じる</button>`);
+  els.utilityContent.querySelectorAll("[data-restore-point]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const point = points.find((item) => item.id === button.dataset.restorePoint);
+      if (!point) return;
+      markStateMutation(`復元: ${point.label}`);
+      state = migrateState(point.state);
+      closeUtilityDialog();
+      render();
+    });
+  });
+}
+
+async function updateStorageUsage() {
+  if (!navigator.storage?.estimate) {
+    els.storageUsage.textContent = appDatabase ? "IndexedDB で保存中" : "localStorage で保存中";
+    return;
+  }
+  try {
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    els.storageUsage.textContent = `${appDatabase ? "IndexedDB" : "localStorage"} · ${formatBytes(usage)} / ${formatBytes(quota)}`;
+  } catch {
+    els.storageUsage.textContent = appDatabase ? "IndexedDB で保存中" : "localStorage で保存中";
+  }
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 MB";
+  return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
@@ -1669,11 +2263,16 @@ function loadState() {
 }
 
 function saveState() {
+  const snapshot = serializeState(state);
+  if (snapshot === lastPersistedSnapshot) return;
+  lastPersistedSnapshot = snapshot;
+  persistStateToIndexedDb().then(updateStorageUsage).catch(() => { lastPersistedSnapshot = ""; });
   try {
     localStorage.setItem(storageKey, JSON.stringify(state));
     storageQuotaAlertShown = false;
   } catch {
-    if (!storageQuotaAlertShown) {
+    if (!appDatabase) lastPersistedSnapshot = "";
+    if (!appDatabase && !storageQuotaAlertShown) {
       storageQuotaAlertShown = true;
       alert("データを保存できませんでした。画像を減らすか、小さい画像を追加してください。");
     }
@@ -1731,7 +2330,9 @@ function migrateState(rawState) {
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
       order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || "",
-      attachments: normalizeAttachments(task.attachments)
+      attachments: normalizeAttachments(task.attachments),
+      createdAt: task.createdAt || task.updatedAt || new Date().toISOString(),
+      updatedAt: task.updatedAt || task.createdAt || new Date().toISOString()
     };
   });
 
@@ -1753,7 +2354,9 @@ function migrateState(rawState) {
       completedAt: "",
       order: Date.now(),
       notes: `関連 Issue: ${issue.title}`,
-      attachments: []
+      attachments: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }));
   migrated.tasks = [
     ...migratedLegacyTodos,
@@ -1767,9 +2370,11 @@ function migrateState(rawState) {
 
 function sortByUrgency(a, b) {
   const doneWeight = (task) => isDone(task) ? 3 : 0;
+  const stalledWeight = (task) => isTaskStalled(task) ? -1 : 0;
   const typeWeight = (task) => task.type === "issue" ? -1 : 0;
   const priorityWeight = { 高: -3, 中: -2, 低: -1 };
   return doneWeight(a) - doneWeight(b)
+    || stalledWeight(a) - stalledWeight(b)
     || daysUntil(a.due) - daysUntil(b.due)
     || priorityWeight[a.priority] - priorityWeight[b.priority]
     || typeWeight(a) - typeWeight(b);
@@ -1814,6 +2419,15 @@ function currentView() {
 
 function isDone(task) {
   return task.type === "todo" ? task.status === todoDoneStatus : task.status === completedStatus;
+}
+
+function stalledDays(task) {
+  if (!task.updatedAt) return 0;
+  return Math.max(0, daysSince(task.updatedAt.slice(0, 10)));
+}
+
+function isTaskStalled(task) {
+  return task.type === "issue" && !isDone(task) && stalledDays(task) >= 3;
 }
 
 function nextWorkflowStep(status) {
@@ -1923,7 +2537,10 @@ function dueText(task) {
 function todayOffset(days) {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function escapeHtml(value) {
