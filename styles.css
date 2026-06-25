@@ -1124,6 +1124,19 @@ textarea {
   overflow: visible;
 }
 
+.todo-detail-row .quick-field-wrap {
+  flex: 0 1 28%;
+  max-width: 28%;
+}
+
+.todo-detail-row .quick-field-wrap .project-name {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quick-menu {
   position: absolute;
   z-index: 35;
