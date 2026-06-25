@@ -36,8 +36,10 @@ let pendingDoneTaskId = "";
 let pendingConvertTaskId = "";
 let showAllTodoDone = false;
 let ownerPickerTaskId = "";
+let projectPickerTaskId = "";
 let duePickerTaskId = "";
 let nextEditorTaskId = "";
+let priorityPickerTaskId = "";
 let currentTaskAttachments = [];
 let storageQuotaAlertShown = false;
 let undoStack = [];
@@ -182,8 +184,10 @@ function bindEvents() {
   document.addEventListener("click", closeWorkflowMenuOnOutsideClick, true);
   document.addEventListener("click", clearPendingDoneOnOtherClick);
   document.addEventListener("click", closeOwnerPickerOnOtherClick);
+  document.addEventListener("click", closeProjectPickerOnOtherClick);
   document.addEventListener("click", closeDuePickerOnOtherClick);
   document.addEventListener("click", closeNextEditorOnOtherClick);
+  document.addEventListener("click", closePriorityPickerOnOtherClick);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
   document.addEventListener("keydown", handleGlobalShortcuts);
@@ -742,6 +746,8 @@ function compactTaskCard(task) {
         `).join("")}
       </div>`
     : "";
+  const projectControl = projectQuickControl(task);
+  const nextAction = nextQuickControl(task, true);
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
   return `
     <article class="todo-card dashboard-compact-card ${urgencyClass}" data-task-id="${task.id}">
@@ -756,9 +762,9 @@ function compactTaskCard(task) {
           </div>
         </div>
         <div class="todo-detail-row">
-          <p>${escapeHtml(task.next)}</p>
-          <button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>
-          ${dueText(task)}
+          ${nextAction}
+          ${projectControl}
+          ${dueText(task, !isDone(task))}
           ${stalledBadge}
         </div>
       </div>
@@ -778,6 +784,8 @@ function todoCard(task, enableDrag = false) {
       ? `<button class="todo-check confirm" data-done="${task.id}" type="button" aria-label="完了を確認"></button>`
       : `<button class="todo-check" data-done="${task.id}" type="button" aria-label="完了"></button>`)
     : `<button class="todo-check done" data-reopen-todo="${task.id}" type="button" aria-label="Todoに戻す"></button>`;
+  const projectControl = projectQuickControl(task);
+  const nextAction = nextQuickControl(task, true);
   return `
     <article class="todo-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && !isDone(task) ? `draggable="true"` : ""}>
       ${doneButton}
@@ -787,8 +795,8 @@ function todoCard(task, enableDrag = false) {
           <button class="todo-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>
         </div>
         <div class="todo-detail-row">
-          <p>${escapeHtml(task.next)}</p>
-          <button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button>
+          ${nextAction}
+          ${projectControl}
         </div>
       </div>
     </article>
@@ -819,17 +827,10 @@ function taskCard(task, enableDrag = false) {
         `).join("")}
       </div>`
     : "";
+  const projectControl = projectQuickControl(task);
+  const priorityControl = priorityQuickControl(task, priorityClass);
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
-  const nextAction = nextEditorTaskId === task.id
-    ? `<div class="next-quick-editor">
-        <textarea data-next-editor="${task.id}" maxlength="220" rows="3" aria-label="次のアクションを編集">${escapeHtml(task.next)}</textarea>
-        <div class="next-editor-actions">
-          <span>Ctrl+Enter で保存</span>
-          <button data-next-cancel="${task.id}" type="button" aria-label="キャンセル" title="キャンセル">×</button>
-          <button class="save" data-next-save="${task.id}" type="button" aria-label="保存" title="保存">✓</button>
-        </div>
-      </div>`
-    : `<button class="next next-edit-button" data-next-open="${task.id}" type="button" title="次のアクションを編集">${escapeHtml(task.next)}</button>`;
+  const nextAction = nextQuickControl(task);
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
@@ -839,16 +840,55 @@ function taskCard(task, enableDrag = false) {
           ${ownerMenu}
         </div>
       </div>
-      <div class="meta"><button class="project-name" data-project-filter="${escapeHtml(task.project)}" type="button">${escapeHtml(task.project)}</button><span class="meta-right">${stalledBadge}${dueText(task, task.type === "issue" && !isDone(task))}</span></div>
+      <div class="meta">${projectControl}<span class="meta-right">${stalledBadge}${dueText(task, task.type === "issue" && !isDone(task))}</span></div>
       ${nextAction}
       <div class="tags">
-        <span class="tag ${priorityClass}">${task.priority}</span>
+        ${priorityControl}
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
         ${canFinish ? doneButton : ""}
       </div>
     </article>
   `;
+}
+
+function projectQuickControl(task) {
+  const projects = [...new Set([...state.tasks.map((item) => item.project), task.project].filter(Boolean))].sort();
+  const menu = projectPickerTaskId === task.id
+    ? `<div class="quick-menu project-menu" role="menu">
+        <input class="quick-menu-input" value="${escapeHtml(task.project)}" data-project-input="${task.id}" list="projectList" maxlength="40" aria-label="案件を変更">
+        ${projects.map((project) => `
+          <button class="quick-choice${project === task.project ? " active" : ""}" data-project-choice="${escapeHtml(project)}" data-project-task="${task.id}" type="button" role="menuitem">${escapeHtml(project)}</button>
+        `).join("")}
+      </div>`
+    : "";
+  return `<span class="quick-field-wrap"><button class="project-name" data-project-picker="${task.id}" data-project-filter="${escapeHtml(task.project)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.project)}</button>${menu}</span>`;
+}
+
+function priorityQuickControl(task, priorityClass) {
+  const menu = priorityPickerTaskId === task.id
+    ? `<div class="quick-menu priority-menu" role="menu">
+        ${priorities.map((priority) => `
+          <button class="quick-choice${priority === task.priority ? " active" : ""}" data-priority-choice="${priority}" data-priority-task="${task.id}" type="button" role="menuitem">${priority}</button>
+        `).join("")}
+      </div>`
+    : "";
+  return `<span class="quick-field-wrap"><button class="tag ${priorityClass} priority-button" data-priority-picker="${task.id}" data-priority-filter="${escapeHtml(task.priority)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.priority)}</button>${menu}</span>`;
+}
+
+function nextQuickControl(task, compact = false) {
+  const compactClass = compact ? " compact-next-editor" : "";
+  const buttonClass = compact ? "next compact-next-button" : "next next-edit-button";
+  return nextEditorTaskId === task.id
+    ? `<div class="next-quick-editor${compactClass}">
+        <textarea data-next-editor="${task.id}" maxlength="220" rows="3" aria-label="次のアクションを編集">${escapeHtml(task.next)}</textarea>
+        <div class="next-editor-actions">
+          <span>Ctrl+Enter で保存</span>
+          <button data-next-cancel="${task.id}" type="button" aria-label="キャンセル" title="キャンセル">×</button>
+          <button class="save" data-next-save="${task.id}" type="button" aria-label="保存" title="保存">✓</button>
+        </div>
+      </div>`
+    : `<button class="${buttonClass}" data-next-open="${task.id}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.next)}</button>`;
 }
 
 function wireTaskButtons(root) {
@@ -865,21 +905,57 @@ function wireTaskButtons(root) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (event.ctrlKey) {
+        filterTasksByMember(button.textContent.trim(), currentView());
+        return;
+      }
       ownerPickerTaskId = ownerPickerTaskId === button.dataset.ownerPicker ? "" : button.dataset.ownerPicker;
+      projectPickerTaskId = "";
       duePickerTaskId = "";
       nextEditorTaskId = "";
+      priorityPickerTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
       render();
+    });
+  });
+  root.querySelectorAll("[data-project-picker]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.ctrlKey) {
+        const targetView = currentView() === "projects" ? "dashboard" : currentView();
+        filterTasksByProject(button.dataset.projectFilter, targetView);
+        return;
+      }
+      projectPickerTaskId = projectPickerTaskId === button.dataset.projectPicker ? "" : button.dataset.projectPicker;
+      ownerPickerTaskId = "";
+      duePickerTaskId = "";
+      nextEditorTaskId = "";
+      priorityPickerTaskId = "";
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+      requestAnimationFrame(() => {
+        const input = document.querySelector(`[data-project-input="${CSS.escape(projectPickerTaskId)}"]`);
+        input?.focus();
+        input?.select();
+      });
     });
   });
   root.querySelectorAll("[data-due-picker]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (event.ctrlKey) {
+        filterTasksBySearch(dueFilterQuery(button.dataset.dueFilter || button.textContent.trim()), currentView());
+        return;
+      }
       duePickerTaskId = duePickerTaskId === button.dataset.duePicker ? "" : button.dataset.duePicker;
       ownerPickerTaskId = "";
+      projectPickerTaskId = "";
       nextEditorTaskId = "";
+      priorityPickerTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
       render();
@@ -911,9 +987,15 @@ function wireTaskButtons(root) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (event.ctrlKey) {
+        filterTasksBySearch(`次:"${button.textContent.trim()}"`, currentView());
+        return;
+      }
       nextEditorTaskId = button.dataset.nextOpen;
       ownerPickerTaskId = "";
+      projectPickerTaskId = "";
       duePickerTaskId = "";
+      priorityPickerTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
       render();
@@ -961,14 +1043,68 @@ function wireTaskButtons(root) {
       const taskId = button.dataset.ownerTask;
       const owner = button.dataset.ownerChoice;
       if (!taskId || !owner) return;
-      updateTask(taskId, { owner });
+      updateTask(taskId, { owner }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の担当者を変更`);
       ownerPickerTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
       render();
     });
   });
-  root.querySelectorAll("[data-project-filter]").forEach((button) => {
+  root.querySelectorAll("[data-project-input]").forEach((input) => {
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        projectPickerTaskId = "";
+        render();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        saveQuickProject(input.dataset.projectInput, input.value);
+      }
+    });
+    input.addEventListener("change", () => saveQuickProject(input.dataset.projectInput, input.value));
+  });
+  root.querySelectorAll("[data-project-choice]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      saveQuickProject(button.dataset.projectTask, button.dataset.projectChoice);
+    });
+  });
+  root.querySelectorAll("[data-priority-picker]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.ctrlKey) {
+        filterTasksBySearch(`優先:${button.dataset.priorityFilter}`, currentView());
+        return;
+      }
+      priorityPickerTaskId = priorityPickerTaskId === button.dataset.priorityPicker ? "" : button.dataset.priorityPicker;
+      ownerPickerTaskId = "";
+      projectPickerTaskId = "";
+      duePickerTaskId = "";
+      nextEditorTaskId = "";
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-priority-choice]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const taskId = button.dataset.priorityTask;
+      const priority = button.dataset.priorityChoice;
+      if (!taskId || !priorities.includes(priority)) return;
+      updateTask(taskId, { priority }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の優先度を変更`);
+      priorityPickerTaskId = "";
+      pendingDoneTaskId = "";
+      pendingConvertTaskId = "";
+      render();
+    });
+  });
+  root.querySelectorAll("[data-project-filter]:not([data-project-picker])").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -1567,8 +1703,10 @@ function filterTasksBySearch(value, targetView = "dashboard") {
   pendingDoneTaskId = "";
   pendingConvertTaskId = "";
   ownerPickerTaskId = "";
+  projectPickerTaskId = "";
   duePickerTaskId = "";
   nextEditorTaskId = "";
+  priorityPickerTaskId = "";
   switchView(targetView);
   render();
 }
@@ -1884,6 +2022,12 @@ function closeOwnerPickerOnOtherClick(event) {
   render();
 }
 
+function closeProjectPickerOnOtherClick(event) {
+  if (!projectPickerTaskId || event.target.closest("[data-project-picker], [data-project-choice], [data-project-input], .project-menu")) return;
+  projectPickerTaskId = "";
+  render();
+}
+
 function closeDuePickerOnOtherClick(event) {
   if (!duePickerTaskId || event.target.closest("[data-due-picker], [data-due-choice], .due-picker-menu")) return;
   duePickerTaskId = "";
@@ -1893,6 +2037,21 @@ function closeDuePickerOnOtherClick(event) {
 function closeNextEditorOnOtherClick(event) {
   if (!nextEditorTaskId || event.target.closest("[data-next-open], [data-next-editor], [data-next-save], [data-next-cancel], .next-quick-editor")) return;
   nextEditorTaskId = "";
+  render();
+}
+
+function closePriorityPickerOnOtherClick(event) {
+  if (!priorityPickerTaskId || event.target.closest("[data-priority-picker], [data-priority-choice], .priority-menu")) return;
+  priorityPickerTaskId = "";
+  render();
+}
+
+function saveQuickProject(taskId, value) {
+  const project = String(value || "").trim();
+  if (!taskId || !project) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  updateTask(taskId, { project }, `「${task?.title || "項目"}」の案件を変更`);
+  projectPickerTaskId = "";
   render();
 }
 
@@ -1984,6 +2143,7 @@ function parseSearchQuery(query) {
     "期限": "due", due: "due",
     "状態": "status", "ステータス": "status", status: "status",
     "優先": "priority", "優先度": "priority", priority: "priority",
+    "次": "next", "次のアクション": "next", next: "next",
     "完了": "done", done: "done"
   };
   return (String(query || "").match(/(?:[^\s\"]+|\"[^\"]*\")+/g) || []).map((rawToken) => {
@@ -2006,6 +2166,7 @@ function matchesSearchCriterion(task, criterion) {
   if (criterion.key === "project") return task.project.toLowerCase().includes(value);
   if (criterion.key === "type") return taskLabel(task).toLowerCase() === value || task.type === value;
   if (criterion.key === "priority") return task.priority.toLowerCase() === value.replace(/優先度|優先/g, "");
+  if (criterion.key === "next") return task.next.toLowerCase().includes(value);
   if (criterion.key === "done") {
     const wantsDone = ["true", "yes", "1", "済", "完了"].includes(value);
     const wantsOpen = ["false", "no", "0", "未完了"].includes(value);
@@ -2640,6 +2801,14 @@ function daysUntil(dateString) {
   return Math.round((due - today) / 86400000);
 }
 
+function dueFilterQuery(dateString) {
+  const diff = daysUntil(dateString);
+  if (diff < 0) return "期限:期限超過";
+  if (diff === 0) return "期限:今日";
+  if (diff === 1) return "期限:明日";
+  return `期限:${dateString}`;
+}
+
 function formatDue(dateString) {
   const diff = daysUntil(dateString);
   if (diff < 0) return `${Math.abs(diff)}日遅れ`;
@@ -2678,7 +2847,7 @@ function dueText(task, editable = false) {
   const picker = duePickerTaskId === task.id
     ? `<span class="due-picker-menu"><input type="date" value="${escapeHtml(task.due)}" data-due-choice="${task.id}" aria-label="期限を変更"></span>`
     : "";
-  return `<span class="due-picker-wrap"><button class="${className} due-button" data-due-picker="${task.id}" type="button" title="期限を変更">${label}</button>${picker}</span>`;
+  return `<span class="due-picker-wrap"><button class="${className} due-button" data-due-picker="${task.id}" data-due-filter="${escapeHtml(task.due)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${label}</button>${picker}</span>`;
 }
 
 function todayOffset(days) {

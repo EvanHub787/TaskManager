@@ -855,6 +855,7 @@ textarea {
 .todo-detail-row p,
 .todo-detail-row span,
 .todo-detail-row .project-name,
+.todo-detail-row .compact-next-button,
 .todo-title-button {
   min-width: 0;
   overflow: hidden;
@@ -1112,6 +1113,43 @@ textarea {
   box-shadow: 0 12px 28px rgba(27, 42, 35, .14);
 }
 
+.quick-field-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.todo-detail-row .quick-field-wrap,
+.todo-detail-row .due-picker-wrap {
+  overflow: visible;
+}
+
+.quick-menu {
+  position: absolute;
+  z-index: 35;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 150px;
+  max-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(27, 42, 35, .14);
+}
+
+.quick-menu.priority-menu {
+  min-width: 84px;
+}
+
+.quick-menu-input {
+  width: 100%;
+  min-height: 30px;
+  margin-bottom: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
 .owner-choice {
   width: 100%;
   min-height: 30px;
@@ -1127,9 +1165,25 @@ textarea {
 }
 
 .owner-choice:hover,
-.owner-choice.active {
+.owner-choice.active,
+.quick-choice:hover,
+.quick-choice.active {
   background: var(--soft);
   color: var(--accent);
+}
+
+.quick-choice {
+  width: 100%;
+  min-height: 30px;
+  justify-content: flex-start;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
 }
 
 .project-name {
@@ -1302,6 +1356,17 @@ textarea {
   color: #1d5b88;
 }
 
+.priority-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.priority-button:hover {
+  filter: brightness(.98);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .next {
   color: #314038;
   font-size: 13px;
@@ -1324,10 +1389,32 @@ textarea {
   text-underline-offset: 2px;
 }
 
+.compact-next-button {
+  flex: 1 1 auto;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.compact-next-button:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .next-quick-editor {
   display: grid;
   gap: 6px;
   margin: 10px 0;
+}
+
+.compact-next-editor {
+  flex: 1 1 100%;
+  margin: 2px 0;
 }
 
 .next-quick-editor textarea {
