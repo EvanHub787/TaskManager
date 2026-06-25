@@ -862,7 +862,7 @@ function projectQuickControl(task) {
         `).join("")}
       </div>`
     : "";
-  return `<span class="quick-field-wrap"><button class="project-name" data-project-picker="${task.id}" data-project-filter="${escapeHtml(task.project)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.project)}</button>${menu}</span>`;
+  return `<span class="quick-field-wrap project-quick-wrap"><button class="project-name" data-project-picker="${task.id}" data-project-filter="${escapeHtml(task.project)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.project)}</button>${menu}</span>`;
 }
 
 function priorityQuickControl(task, priorityClass) {

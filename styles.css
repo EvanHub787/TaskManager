@@ -1137,6 +1137,15 @@ textarea {
   white-space: nowrap;
 }
 
+.todo-detail-row .project-quick-wrap {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.todo-detail-row .project-quick-wrap .project-name {
+  text-align: right;
+}
+
 .quick-menu {
   position: absolute;
   z-index: 35;
