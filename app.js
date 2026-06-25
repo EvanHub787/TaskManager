@@ -300,7 +300,7 @@ function focusItem(task) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueLink = issueNumber
-    ? `<a class="focus-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    ? `<a class="focus-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
     : "";
   return `
     <div class="focus-item">
@@ -572,8 +572,7 @@ function openDailyReport() {
 function reportTaskLines(tasks, emptyMessage) {
   return tasks.length
     ? tasks.map((task) => {
-      const issue = extractIssueNumber(task.link);
-      const prefix = issue ? `#${issue} ` : "";
+      const prefix = extractIssueNumber(task.link) ? `${issueLabel(task.link)} ` : "";
       const stateText = isDone(task) ? "" : ` (${task.status} / ${task.owner})`;
       return `・${prefix}${task.title}: ${task.next}${stateText}`;
     })
@@ -727,7 +726,7 @@ function compactTaskCard(task) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueBadge = issueNumber
-    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
     : "";
   const doneButton = !isDone(task)
     ? (pendingDoneTaskId === task.id
@@ -772,7 +771,7 @@ function todoCard(task, enableDrag = false) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueBadge = issueNumber
-    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
     : "";
   const doneButton = !isDone(task)
     ? (pendingDoneTaskId === task.id
@@ -803,7 +802,7 @@ function taskCard(task, enableDrag = false) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueBadge = issueNumber
-    ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">#${escapeHtml(issueNumber)}</a>`
+    ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
     : "";
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
   const canConvert = task.type === "todo" && !task.linkedIssueId && task.status !== todoDoneStatus;
@@ -2583,6 +2582,21 @@ function extractUrl(value) {
 function extractIssueNumber(value) {
   const match = normalizeUrl(value).match(/\/issues\/(\d+)(?:[/?#]|$)/i);
   return match ? match[1] : "";
+}
+
+function issueLabel(value) {
+  const number = extractIssueNumber(value);
+  if (!number) return "";
+  const url = normalizeUrl(value).toLowerCase();
+  const categories = [
+    { path: "/step3/external-test-issue/-/issues/", label: "外結" },
+    { path: "/step3/integration-test-issue/-/issues/", label: "総合" },
+    { path: "/001-sej/inner-coupling-tests/step3/-/issues/", label: "内結" },
+    { path: "/001-sej/issue/-/issues/", label: "開発" },
+    { path: "/001-sej/unit-integration-tests/step3/-/issues/", label: "単結" }
+  ];
+  const category = categories.find((item) => url.includes(item.path));
+  return `${category ? `${category.label} ` : ""}#${number}`;
 }
 
 function issueTask(title, project, owner, due, status, priority, next, notes) {
