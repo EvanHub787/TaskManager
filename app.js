@@ -456,21 +456,37 @@ async function refreshGitLabIssueStatuses() {
 
   gitlabRefreshing = true;
   renderWorkflowTopControl();
+  showToast(`GitLab 状態を更新中... (${issueTasks.length}件)`, false);
   let successCount = 0;
+  const errors = [];
   const checkedAt = new Date().toISOString();
 
-  for (const task of issueTasks) {
-    const result = await fetchGitLabIssueStatus(task.link, token, checkedAt);
-    if (!result.error) successCount += 1;
-    state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab: result, updatedAt: new Date().toISOString() } : item);
+  try {
+    for (const task of issueTasks) {
+      const result = await fetchGitLabIssueStatus(task.link, token, checkedAt);
+      if (!result.error) {
+        successCount += 1;
+      } else {
+        errors.push(result.error);
+      }
+      state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab: result, updatedAt: new Date().toISOString() } : item);
+    }
+    lastStateSnapshot = serializeState(state);
+    pendingMutationLabel = "";
+    await persistState();
+  } catch (error) {
+    errors.push(error?.message || "予期しないエラー");
+  } finally {
+    gitlabRefreshing = false;
+    render();
   }
 
-  gitlabRefreshing = false;
-  lastStateSnapshot = serializeState(state);
-  pendingMutationLabel = "";
-  await persistState();
-  render();
-  showToast(`GitLab 状態を更新しました。${successCount}/${issueTasks.length} 件成功`, false);
+  if (successCount === issueTasks.length) {
+    showToast(`GitLab 状態を更新しました。${successCount}/${issueTasks.length} 件成功`, false);
+  } else {
+    const firstError = [...new Set(errors)].find(Boolean) || "詳細不明";
+    showToast(`GitLab 状態更新に失敗しました。${successCount}/${issueTasks.length} 件成功: ${firstError}`, false);
+  }
 }
 
 async function fetchGitLabIssueStatus(link, token, checkedAt) {
@@ -478,10 +494,15 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
   if (!parsed) {
     return { state: "", updatedAt: "", checkedAt, error: "Issue URL を解析できませんでした。" };
   }
+  let timeoutId = null;
   try {
+    const controller = new AbortController();
+    timeoutId = setTimeout(() => controller.abort(), 12000);
     const response = await fetch(parsed.apiUrl, {
-      headers: token ? { "PRIVATE-TOKEN": token } : {}
+      headers: token ? { "PRIVATE-TOKEN": token } : {},
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     if (response.status === 401 || response.status === 403) {
       localStorage.removeItem(gitlabTokenKey);
       return { state: "", updatedAt: "", checkedAt, error: "GitLab token を確認してください。" };
@@ -496,8 +517,12 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
       checkedAt,
       error: ""
     };
-  } catch {
-    return { state: "", updatedAt: "", checkedAt, error: "GitLab API に接続できませんでした。" };
+  } catch (error) {
+    if (timeoutId) clearTimeout(timeoutId);
+    const message = error?.name === "AbortError"
+      ? "GitLab API がタイムアウトしました。"
+      : "GitLab API に接続できませんでした。CORS またはネットワークを確認してください。";
+    return { state: "", updatedAt: "", checkedAt, error: message };
   }
 }
 
