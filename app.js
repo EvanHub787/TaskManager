@@ -306,11 +306,7 @@ function renderTodayFocus() {
 }
 
 function focusItem(task) {
-  const issueNumber = extractIssueNumber(task.link);
-  const taskUrl = normalizeUrl(task.link);
-  const issueLink = issueNumber
-    ? `<a class="focus-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
-    : "";
+  const issueLink = issueBadges(task, "focus-issue-number");
   return `
     <div class="focus-item">
       ${issueLink}
@@ -566,6 +562,44 @@ function isGitLabClosed(task) {
   return String(task.gitlab?.state || "").toLowerCase() === "closed";
 }
 
+function issueBadges(task, className) {
+  const references = issueReferences(task.link);
+  if (!references.length) return "";
+  const updateDot = gitlabUpdateDot(task);
+  return references.map((reference, index) => {
+    const dot = index === 0 ? updateDot : "";
+    return reference.url
+      ? `<a class="${className}" href="${escapeHtml(reference.url)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(reference.label)}${dot}</a>`
+      : `<span class="${className} issue-number-static">${escapeHtml(reference.label)}${dot}</span>`;
+  }).join("");
+}
+
+function issueReferences(value) {
+  return splitIssueValues(value)
+    .map((item) => {
+      const number = extractIssueNumber(item);
+      if (!number) return null;
+      const url = isBareIssueNumber(item) ? "" : normalizeUrl(item);
+      return {
+        url,
+        number,
+        label: issueLabel(item)
+      };
+    })
+    .filter(Boolean);
+}
+
+function splitIssueValues(value) {
+  return String(value || "")
+    .split(/[\s,、，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isBareIssueNumber(value) {
+  return /^\d+$/.test(String(value || "").trim());
+}
+
 function hasUnseenGitLabUpdate(task) {
   const gitlab = normalizeGitLabStatus(task.gitlab);
   if (!gitlab?.updatedAt || gitlab.error) return false;
@@ -771,9 +805,9 @@ function openDailyReport() {
 function reportTaskLines(tasks, emptyMessage) {
   return tasks.length
     ? tasks.map((task) => {
-      const prefix = extractIssueNumber(task.link) ? `${issueLabel(task.link)} ` : "";
+      const prefix = issueReferences(task.link).map((reference) => reference.label).join(" ");
       const stateText = isDone(task) ? "" : ` (${task.status} / ${task.owner})`;
-      return `・${prefix}${task.title}: ${task.next}${stateText}`;
+      return `・${prefix ? `${prefix} ` : ""}${task.title}: ${task.next}${stateText}`;
     })
     : [`・${emptyMessage}`];
 }
@@ -922,11 +956,7 @@ function todoDoneHistorySection(title, tasks) {
 
 function compactTaskCard(task) {
   const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
-  const issueNumber = extractIssueNumber(task.link);
-  const taskUrl = normalizeUrl(task.link);
-  const issueBadge = issueNumber
-    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
-    : "";
+  const issueBadge = issueBadges(task, "issue-number compact-issue-number");
   const doneButton = !isDone(task)
     ? (pendingDoneTaskId === task.id
       ? `<button class="todo-check confirm" data-done="${task.id}" type="button" aria-label="完了を確認"></button>`
@@ -969,11 +999,7 @@ function compactTaskCard(task) {
 
 function todoCard(task, enableDrag = false) {
   const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
-  const issueNumber = extractIssueNumber(task.link);
-  const taskUrl = normalizeUrl(task.link);
-  const issueBadge = issueNumber
-    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
-    : "";
+  const issueBadge = issueBadges(task, "issue-number compact-issue-number");
   const doneButton = !isDone(task)
     ? (pendingDoneTaskId === task.id
       ? `<button class="todo-check confirm" data-done="${task.id}" type="button" aria-label="完了を確認"></button>`
@@ -1003,11 +1029,7 @@ function taskCard(task, enableDrag = false) {
   const gitlabClass = isGitLabClosed(task) ? "gitlab-closed" : "";
   const priorityClass = task.priority === "高" ? "high" : task.priority === "中" ? "middle" : "low";
   const canFinish = !isDone(task);
-  const issueNumber = extractIssueNumber(task.link);
-  const taskUrl = normalizeUrl(task.link);
-  const issueBadge = issueNumber
-    ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
-    : "";
+  const issueBadge = issueBadges(task, "issue-number");
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
   const canConvert = task.type === "todo" && !task.linkedIssueId && task.status !== todoDoneStatus;
   const convertButton = pendingConvertTaskId === task.id
@@ -1993,7 +2015,7 @@ function handleTaskLinkInput() {
 async function fetchIssueTitleFromLink() {
   if (els.taskType.value !== "issue") return;
   if (els.taskId.value) return;
-  const link = normalizeUrl(els.taskLink.value);
+  const link = normalizeTaskLinkInput(els.taskLink.value, "issue");
   if (!parseGitLabIssueLink(link)) return;
 
   const requestId = ++gitlabTitleRequestId;
@@ -2189,7 +2211,7 @@ function saveTask(event) {
   const id = els.taskId.value || crypto.randomUUID();
   const type = els.taskType.value;
   const existingTask = state.tasks.find((item) => item.id === id);
-  const link = normalizeUrl(els.taskLink.value);
+  const link = normalizeTaskLinkInput(els.taskLink.value, type);
   const status = els.taskStatus.value;
   const doneStatus = type === "todo" ? todoDoneStatus : completedStatus;
   const completedAt = status === doneStatus
@@ -2243,10 +2265,11 @@ function saveTask(event) {
 }
 
 function hasDuplicateIssueLink(taskId, link) {
+  const normalizedLink = normalizeTaskLinkInput(link, "issue");
   return state.tasks.some((task) => (
     task.type === "issue"
     && task.id !== taskId
-    && normalizeUrl(task.link) === link
+    && normalizeTaskLinkInput(task.link, "issue") === normalizedLink
   ));
 }
 
@@ -2318,7 +2341,9 @@ function syncIssueLinkRequirement() {
   const isIssue = els.taskType.value === "issue";
   els.taskLink.setCustomValidity("");
   els.taskLink.required = isIssue;
-  els.taskLink.placeholder = isIssue ? "https://example.com/issues/123" : "任意: https://example.com/issues/123";
+  els.taskLink.placeholder = isIssue
+    ? "https://example.com/issues/123"
+    : "任意: Issue URL / Issue 番号を複数入力できます（改行・カンマ区切り）";
 }
 
 function syncCompletedAtField() {
@@ -2504,7 +2529,7 @@ function emptyState(defaultMessage) {
 }
 
 function searchableTaskText(task) {
-  const issueNumber = extractIssueNumber(task.link);
+  const issueNumbers = issueReferences(task.link).map((reference) => reference.number);
   return [
     task.type,
     task.title,
@@ -2516,8 +2541,8 @@ function searchableTaskText(task) {
     task.notes,
     ...(Array.isArray(task.attachments) ? task.attachments.map((attachment) => attachment.name).filter(Boolean) : []),
     task.link,
-    issueNumber,
-    issueNumber ? `#${issueNumber}` : "",
+    ...issueNumbers,
+    ...issueNumbers.map((issueNumber) => `#${issueNumber}`),
     task.linkedIssueId ? "関連 issue todo" : ""
   ].filter(Boolean).join(" ").toLowerCase();
 }
@@ -2854,7 +2879,7 @@ function migrateState(rawState) {
       linkedIssueId: type === "todo" ? task.linkedIssueId || "" : "",
       completedAt: [todoDoneStatus, completedStatus].includes(mappedStatus) ? task.completedAt || task.due || todayOffset(0) : "",
       next: task.next || "次のアクションを確認する。",
-      link: normalizeUrl(task.link || extractUrl(task.notes || "")),
+      link: normalizeTaskLinkInput(task.link || extractUrl(task.notes || ""), type),
       gitlab: type === "issue" ? normalizeGitLabStatus(task.gitlab) : null,
       order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || "",
@@ -2975,12 +3000,24 @@ function normalizeUrl(value) {
   return `https://${url}`;
 }
 
+function normalizeTaskLinkInput(value, type = "issue") {
+  const entries = splitIssueValues(value);
+  if (!entries.length) return "";
+  if (type === "issue") {
+    const first = entries[0];
+    return isBareIssueNumber(first) ? first : normalizeUrl(first);
+  }
+  return entries.map((entry) => isBareIssueNumber(entry) ? entry : normalizeUrl(entry)).join("\n");
+}
+
 function extractUrl(value) {
   const match = String(value || "").match(/https?:\/\/[^\s]+/i);
   return match ? match[0] : "";
 }
 
 function extractIssueNumber(value) {
+  const rawValue = String(value || "").trim();
+  if (isBareIssueNumber(rawValue)) return rawValue;
   const match = normalizeUrl(value).match(/\/issues\/(\d+)(?:[/?#]|$)/i);
   return match ? match[1] : "";
 }
@@ -2988,6 +3025,7 @@ function extractIssueNumber(value) {
 function issueLabel(value) {
   const number = extractIssueNumber(value);
   if (!number) return "";
+  if (isBareIssueNumber(value)) return `#${number}`;
   const url = normalizeUrl(value).toLowerCase();
   const categories = [
     { path: "/step3/external-test-issue/-/issues/", label: "外結" },
