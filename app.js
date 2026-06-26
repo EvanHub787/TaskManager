@@ -503,9 +503,15 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       localStorage.removeItem(gitlabTokenKey);
-      return { state: "", updatedAt: "", checkedAt, error: "GitLab token を確認してください。" };
+      return { state: "", updatedAt: "", checkedAt, error: "GitLab token が無効、または期限切れです。" };
+    }
+    if (response.status === 403) {
+      return { state: "", updatedAt: "", checkedAt, error: "GitLab token の権限が不足しています。" };
+    }
+    if (response.status === 404) {
+      return { state: "", updatedAt: "", checkedAt, error: "GitLab project / issue が見つからない、またはアクセス権がありません。" };
     }
     if (!response.ok) {
       return { state: "", updatedAt: "", checkedAt, error: `GitLab API ${response.status}` };
