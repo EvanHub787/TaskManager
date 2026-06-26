@@ -198,6 +198,8 @@ svg {
 
 .focus-issue-number {
   display: inline-flex;
+  align-items: center;
+  gap: 5px;
   width: fit-content;
   color: #8ee0b1;
   font-size: 12px;
@@ -1073,6 +1075,10 @@ textarea {
   border-left-color: var(--warn);
 }
 
+.task-card.gitlab-closed {
+  border-left-color: #98a2a0;
+}
+
 .card-heading {
   position: relative;
   display: grid;
@@ -1268,6 +1274,7 @@ textarea {
 .issue-number {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   min-height: 20px;
   padding: 0 7px;
   border: 1px solid #cfe0d4;
@@ -1285,26 +1292,13 @@ textarea {
   color: var(--accent);
 }
 
-.gitlab-status-dot {
+.gitlab-update-dot {
   flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  margin: 0 4px 0 -2px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  background: #b7c2ba;
-  box-shadow: 0 0 0 2px #fff;
-}
-
-.gitlab-status-dot.open {
-  background: #16a34a;
-}
-
-.gitlab-status-dot.closed {
-  background: #2563eb;
-}
-
-.gitlab-status-dot.error {
-  background: var(--danger);
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, .18);
 }
 
 .meta,

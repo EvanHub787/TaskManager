@@ -52,6 +52,7 @@ let suppressHistoryCapture = true;
 let toastTimer = null;
 let appDatabase = null;
 let gitlabRefreshing = false;
+let gitlabTitleRequestId = 0;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -166,7 +167,8 @@ function bindEvents() {
   els.closeEndDayDialog.addEventListener("click", () => els.endDayDialog.close());
   els.cancelEndDayDialog.addEventListener("click", () => els.endDayDialog.close());
   els.undoBtn.addEventListener("click", undoLastChange);
-  els.taskLink.addEventListener("input", () => els.taskLink.setCustomValidity(""));
+  els.taskLink.addEventListener("input", handleTaskLinkInput);
+  els.taskLink.addEventListener("blur", fetchIssueTitleFromLink);
   els.taskNext.addEventListener("input", autoResizeTaskNext);
   els.taskImages.addEventListener("change", handleTaskImageFiles);
   els.taskNotes.addEventListener("paste", handleTaskImagePaste);
@@ -190,6 +192,7 @@ function bindEvents() {
   document.addEventListener("click", closeDuePickerOnOtherClick);
   document.addEventListener("click", closeNextEditorOnOtherClick);
   document.addEventListener("click", closePriorityPickerOnOtherClick);
+  document.addEventListener("click", markGitLabSeenFromIssueLink);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
   document.addEventListener("keydown", handleGlobalShortcuts);
@@ -306,7 +309,7 @@ function focusItem(task) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueLink = issueNumber
-    ? `<a class="focus-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
+    ? `<a class="focus-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
     : "";
   return `
     <div class="focus-item">
@@ -447,12 +450,7 @@ async function refreshGitLabIssueStatuses() {
     return;
   }
 
-  let token = localStorage.getItem(gitlabTokenKey) || "";
-  if (!token) {
-    token = window.prompt("GitLab Access Token を入力してください。ブラウザの localStorage に保存します。") || "";
-    if (!token) return;
-    localStorage.setItem(gitlabTokenKey, token);
-  }
+  if (!ensureGitLabToken()) return;
 
   gitlabRefreshing = true;
   renderWorkflowTopControl();
@@ -463,13 +461,14 @@ async function refreshGitLabIssueStatuses() {
 
   try {
     for (const task of issueTasks) {
-      const result = await fetchGitLabIssueStatus(task.link, token, checkedAt);
+      const result = await fetchGitLabIssueStatusWithSavedToken(task.link, checkedAt);
+      const gitlab = { ...result, seenUpdatedAt: normalizeGitLabStatus(task.gitlab)?.seenUpdatedAt || "" };
       if (!result.error) {
         successCount += 1;
       } else {
         errors.push(result.error);
       }
-      state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab: result, updatedAt: new Date().toISOString() } : item);
+      state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab, updatedAt: new Date().toISOString() } : item);
     }
     lastStateSnapshot = serializeState(state);
     pendingMutationLabel = "";
@@ -519,6 +518,7 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
     const issue = await response.json();
     return {
       state: issue.state || "",
+      title: issue.title || "",
       updatedAt: issue.updated_at || "",
       checkedAt,
       error: ""
@@ -562,24 +562,49 @@ function splitGitLabProjectPath(rawPath) {
     : { basePath: "", projectPath: path };
 }
 
-function gitlabStatusDot(task) {
-  if (task.type !== "issue" || !extractIssueNumber(task.link)) return "";
-  const gitlab = task.gitlab || {};
-  const state = String(gitlab.state || "").toLowerCase();
-  const statusClass = gitlab.error ? "error" : ["opened", "open"].includes(state) ? "open" : state === "closed" ? "closed" : "unknown";
-  const label = gitlab.error
-    ? `GitLab: ${gitlab.error}`
-    : state
-      ? `GitLab: ${state}${gitlab.updatedAt ? ` / 最終更新 ${formatDateTime(gitlab.updatedAt)}` : ""}${gitlab.checkedAt ? ` / 確認 ${formatDateTime(gitlab.checkedAt)}` : ""}`
-      : "GitLab: 未更新";
-  return `<span class="gitlab-status-dot ${statusClass}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"></span>`;
+function isGitLabClosed(task) {
+  return String(task.gitlab?.state || "").toLowerCase() === "closed";
+}
+
+function hasUnseenGitLabUpdate(task) {
+  const gitlab = normalizeGitLabStatus(task.gitlab);
+  if (!gitlab?.updatedAt || gitlab.error) return false;
+  if (!gitlab.seenUpdatedAt) return true;
+  const updated = new Date(gitlab.updatedAt).getTime();
+  const seen = new Date(gitlab.seenUpdatedAt).getTime();
+  if (Number.isNaN(updated) || Number.isNaN(seen)) return gitlab.updatedAt !== gitlab.seenUpdatedAt;
+  return updated > seen;
+}
+
+function gitlabUpdateDot(task) {
+  if (!hasUnseenGitLabUpdate(task)) return "";
+  const label = `GitLab 更新あり${task.gitlab?.updatedAt ? `: ${formatDateTime(task.gitlab.updatedAt)}` : ""}`;
+  return `<span class="gitlab-update-dot" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"></span>`;
+}
+
+function markGitLabSeenFromIssueLink(event) {
+  const link = event.target instanceof Element ? event.target.closest("[data-issue-link-task]") : null;
+  if (!link) return;
+  const taskId = link.dataset.issueLinkTask;
+  const task = state.tasks.find((item) => item.id === taskId);
+  const gitlab = normalizeGitLabStatus(task?.gitlab);
+  if (!task || !gitlab?.updatedAt || !hasUnseenGitLabUpdate(task)) return;
+  state.tasks = state.tasks.map((item) => item.id === task.id
+    ? { ...item, gitlab: { ...gitlab, seenUpdatedAt: gitlab.updatedAt }, updatedAt: new Date().toISOString() }
+    : item);
+  lastStateSnapshot = serializeState(state);
+  pendingMutationLabel = "";
+  persistState();
+  window.setTimeout(render, 0);
 }
 
 function normalizeGitLabStatus(value) {
   if (!value || typeof value !== "object") return null;
   return {
     state: String(value.state || ""),
+    title: String(value.title || ""),
     updatedAt: String(value.updatedAt || ""),
+    seenUpdatedAt: String(value.seenUpdatedAt || ""),
     checkedAt: String(value.checkedAt || ""),
     error: String(value.error || "")
   };
@@ -900,7 +925,7 @@ function compactTaskCard(task) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueBadge = issueNumber
-    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
+    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
     : "";
   const doneButton = !isDone(task)
     ? (pendingDoneTaskId === task.id
@@ -947,7 +972,7 @@ function todoCard(task, enableDrag = false) {
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueBadge = issueNumber
-    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
+    ? `<a class="issue-number compact-issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
     : "";
   const doneButton = !isDone(task)
     ? (pendingDoneTaskId === task.id
@@ -975,14 +1000,14 @@ function todoCard(task, enableDrag = false) {
 
 function taskCard(task, enableDrag = false) {
   const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
+  const gitlabClass = isGitLabClosed(task) ? "gitlab-closed" : "";
   const priorityClass = task.priority === "高" ? "high" : task.priority === "中" ? "middle" : "low";
   const canFinish = !isDone(task);
   const issueNumber = extractIssueNumber(task.link);
   const taskUrl = normalizeUrl(task.link);
   const issueBadge = issueNumber
-    ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
+    ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(issueLabel(task.link))}${gitlabUpdateDot(task)}</a>`
     : "";
-  const gitlabBadge = gitlabStatusDot(task);
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
   const canConvert = task.type === "todo" && !task.linkedIssueId && task.status !== todoDoneStatus;
   const convertButton = pendingConvertTaskId === task.id
@@ -1003,9 +1028,9 @@ function taskCard(task, enableDrag = false) {
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
   const nextAction = nextQuickControl(task);
   return `
-    <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
+    <article class="task-card ${urgencyClass} ${gitlabClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
-        <h4>${issueBadge}${gitlabBadge}${title}</h4>
+        <h4>${issueBadge}${title}</h4>
         <div class="card-side">
           <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
           ${ownerMenu}
@@ -1957,6 +1982,48 @@ function openTaskDialog(id, overrides = {}) {
   syncCompletedAtField();
   els.dialog.showModal();
   autoResizeTaskNext();
+}
+
+function handleTaskLinkInput() {
+  els.taskLink.setCustomValidity("");
+  window.clearTimeout(Number(els.taskLink.dataset.titleTimer || 0));
+  els.taskLink.dataset.titleTimer = String(window.setTimeout(fetchIssueTitleFromLink, 650));
+}
+
+async function fetchIssueTitleFromLink() {
+  if (els.taskType.value !== "issue") return;
+  if (els.taskId.value) return;
+  const link = normalizeUrl(els.taskLink.value);
+  if (!parseGitLabIssueLink(link)) return;
+
+  const requestId = ++gitlabTitleRequestId;
+  const result = await fetchGitLabIssueStatusWithSavedToken(link, new Date().toISOString(), true);
+  if (requestId !== gitlabTitleRequestId) return;
+  if (result.error) {
+    showToast(`GitLab タイトル取得に失敗しました: ${result.error}`, false);
+    return;
+  }
+  if (result.title && !els.taskTitle.value.trim()) {
+    els.taskTitle.value = result.title;
+    showToast("GitLab の Issue タイトルを入力しました。", false);
+  }
+}
+
+async function fetchGitLabIssueStatusWithSavedToken(link, checkedAt, promptForToken = false) {
+  const token = localStorage.getItem(gitlabTokenKey) || (promptForToken ? ensureGitLabToken() : "");
+  return fetchGitLabIssueStatus(link, token, checkedAt);
+}
+
+function ensureGitLabToken() {
+  const existingToken = localStorage.getItem(gitlabTokenKey) || "";
+  if (existingToken) return existingToken;
+  const token = window.prompt("GitLab Access Token を入力してください。ブラウザの localStorage に保存します。") || "";
+  if (!token) {
+    showToast("GitLab token が未入力です。", false);
+    return "";
+  }
+  localStorage.setItem(gitlabTokenKey, token);
+  return token;
 }
 
 function autoResizeTaskNext() {
