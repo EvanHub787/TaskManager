@@ -268,6 +268,26 @@ svg {
   display: none;
 }
 
+#workflowTopSlot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gitlab-refresh-button {
+  width: 40px;
+}
+
+.gitlab-refresh-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .action-menu {
   position: relative;
 }
@@ -1263,6 +1283,28 @@ textarea {
 .issue-number:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.gitlab-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin: 0 4px 0 -2px;
+  border-radius: 999px;
+  background: #b7c2ba;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.gitlab-status-dot.open {
+  background: #16a34a;
+}
+
+.gitlab-status-dot.closed {
+  background: #2563eb;
+}
+
+.gitlab-status-dot.error {
+  background: var(--danger);
 }
 
 .meta,

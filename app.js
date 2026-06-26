@@ -6,6 +6,7 @@ const priorities = ["高", "中", "低"];
 const defaultMembers = ["自分", "メンバーA", "メンバーB", "メンバーC", "メンバーD", "メンバーE"];
 const storageKey = "follow-manager-v1";
 const historyKey = "follow-manager-history-v1";
+const gitlabTokenKey = "task-manager-gitlab-token";
 const databaseName = "task-manager-data";
 const databaseVersion = 1;
 const stateStoreName = "state";
@@ -50,6 +51,7 @@ let pendingMutationLabel = "";
 let suppressHistoryCapture = true;
 let toastTimer = null;
 let appDatabase = null;
+let gitlabRefreshing = false;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -395,6 +397,14 @@ function renderWorkflowTopControl() {
   }
 
   els.workflowTopSlot.innerHTML = `
+    <button class="secondary-button icon-button gitlab-refresh-button" data-gitlab-refresh type="button" title="GitLab の Issue 状態を更新" aria-label="GitLab の Issue 状態を更新" ${gitlabRefreshing ? "disabled" : ""}>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21 12a9 9 0 0 1-15.4 6.4"></path>
+        <path d="M3 12A9 9 0 0 1 18.4 5.6"></path>
+        <path d="M18 2v4h-4"></path>
+        <path d="M6 22v-4h4"></path>
+      </svg>
+    </button>
     <details class="action-menu workflow-top-menu"${keepWorkflowMenuOpen ? " open" : ""}>
       <summary class="secondary-button">フロー編集</summary>
       <div class="action-menu-content workflow-menu-content">
@@ -412,6 +422,7 @@ function renderWorkflowTopControl() {
   workflowMenu.addEventListener("toggle", () => {
     keepWorkflowMenuOpen = workflowMenu.open;
   });
+  els.workflowTopSlot.querySelector("[data-gitlab-refresh]")?.addEventListener("click", refreshGitLabIssueStatuses);
   wireWorkflowButtons();
 }
 
@@ -426,6 +437,134 @@ function workflowStepRow(step, index) {
       <button class="tiny-button" data-delete-step="${index}" type="button" ${used || state.workflow.length <= 1 ? "disabled" : ""}>削除</button>
     </div>
   `;
+}
+
+async function refreshGitLabIssueStatuses() {
+  if (gitlabRefreshing) return;
+  const issueTasks = state.tasks.filter((task) => task.type === "issue" && parseGitLabIssueLink(task.link));
+  if (!issueTasks.length) {
+    showToast("更新対象の GitLab Issue URL がありません。", false);
+    return;
+  }
+
+  let token = localStorage.getItem(gitlabTokenKey) || "";
+  if (!token) {
+    token = window.prompt("GitLab Access Token を入力してください。ブラウザの localStorage に保存します。") || "";
+    if (!token) return;
+    localStorage.setItem(gitlabTokenKey, token);
+  }
+
+  gitlabRefreshing = true;
+  renderWorkflowTopControl();
+  let successCount = 0;
+  const checkedAt = new Date().toISOString();
+
+  for (const task of issueTasks) {
+    const result = await fetchGitLabIssueStatus(task.link, token, checkedAt);
+    if (!result.error) successCount += 1;
+    state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab: result, updatedAt: new Date().toISOString() } : item);
+  }
+
+  gitlabRefreshing = false;
+  lastStateSnapshot = serializeState(state);
+  pendingMutationLabel = "";
+  await persistState();
+  render();
+  showToast(`GitLab 状態を更新しました。${successCount}/${issueTasks.length} 件成功`, false);
+}
+
+async function fetchGitLabIssueStatus(link, token, checkedAt) {
+  const parsed = parseGitLabIssueLink(link);
+  if (!parsed) {
+    return { state: "", updatedAt: "", checkedAt, error: "Issue URL を解析できませんでした。" };
+  }
+  try {
+    const response = await fetch(parsed.apiUrl, {
+      headers: token ? { "PRIVATE-TOKEN": token } : {}
+    });
+    if (response.status === 401 || response.status === 403) {
+      localStorage.removeItem(gitlabTokenKey);
+      return { state: "", updatedAt: "", checkedAt, error: "GitLab token を確認してください。" };
+    }
+    if (!response.ok) {
+      return { state: "", updatedAt: "", checkedAt, error: `GitLab API ${response.status}` };
+    }
+    const issue = await response.json();
+    return {
+      state: issue.state || "",
+      updatedAt: issue.updated_at || "",
+      checkedAt,
+      error: ""
+    };
+  } catch {
+    return { state: "", updatedAt: "", checkedAt, error: "GitLab API に接続できませんでした。" };
+  }
+}
+
+function parseGitLabIssueLink(link) {
+  const value = normalizeUrl(link);
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/^\/(.+)\/-\/issues\/(\d+)(?:\/)?$/i);
+    if (!match) return null;
+    const parsedPath = splitGitLabProjectPath(match[1]);
+    const projectPath = parsedPath.projectPath;
+    const issueIid = match[2];
+    return {
+      origin: `${url.origin}${parsedPath.basePath}`,
+      projectPath,
+      issueIid,
+      apiUrl: `${url.origin}${parsedPath.basePath}/api/v4/projects/${encodeURIComponent(projectPath)}/issues/${issueIid}`
+    };
+  } catch {
+    return null;
+  }
+}
+
+function splitGitLabProjectPath(rawPath) {
+  const path = rawPath.replace(/^\/+|\/+$/g, "");
+  const knownBasePaths = ["tec/gitlab"];
+  const base = knownBasePaths.find((basePath) => path === basePath || path.startsWith(`${basePath}/`));
+  return base
+    ? { basePath: `/${base}`, projectPath: path.slice(base.length + 1) }
+    : { basePath: "", projectPath: path };
+}
+
+function gitlabStatusDot(task) {
+  if (task.type !== "issue" || !extractIssueNumber(task.link)) return "";
+  const gitlab = task.gitlab || {};
+  const state = String(gitlab.state || "").toLowerCase();
+  const statusClass = gitlab.error ? "error" : ["opened", "open"].includes(state) ? "open" : state === "closed" ? "closed" : "unknown";
+  const label = gitlab.error
+    ? `GitLab: ${gitlab.error}`
+    : state
+      ? `GitLab: ${state}${gitlab.updatedAt ? ` / 最終更新 ${formatDateTime(gitlab.updatedAt)}` : ""}${gitlab.checkedAt ? ` / 確認 ${formatDateTime(gitlab.checkedAt)}` : ""}`
+      : "GitLab: 未更新";
+  return `<span class="gitlab-status-dot ${statusClass}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"></span>`;
+}
+
+function normalizeGitLabStatus(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    state: String(value.state || ""),
+    updatedAt: String(value.updatedAt || ""),
+    checkedAt: String(value.checkedAt || ""),
+    error: String(value.error || "")
+  };
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function renderTodo() {
@@ -812,6 +951,7 @@ function taskCard(task, enableDrag = false) {
   const issueBadge = issueNumber
     ? `<a class="issue-number" href="${escapeHtml(taskUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(task.link))}</a>`
     : "";
+  const gitlabBadge = gitlabStatusDot(task);
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
   const canConvert = task.type === "todo" && !task.linkedIssueId && task.status !== todoDoneStatus;
   const convertButton = pendingConvertTaskId === task.id
@@ -834,7 +974,7 @@ function taskCard(task, enableDrag = false) {
   return `
     <article class="task-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
-        <h4>${issueBadge}${title}</h4>
+        <h4>${issueBadge}${gitlabBadge}${title}</h4>
         <div class="card-side">
           <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
           ${ownerMenu}
@@ -1983,6 +2123,7 @@ function saveTask(event) {
     completedAt,
     next: els.taskNext.value.trim(),
     link,
+    gitlab: type === "issue" && existingTask?.link === link ? normalizeGitLabStatus(existingTask.gitlab) : null,
     order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
     notes: els.taskNotes.value.trim(),
     attachments: normalizeAttachments(currentTaskAttachments),
@@ -2616,6 +2757,7 @@ function migrateState(rawState) {
       completedAt: [todoDoneStatus, completedStatus].includes(mappedStatus) ? task.completedAt || task.due || todayOffset(0) : "",
       next: task.next || "次のアクションを確認する。",
       link: normalizeUrl(task.link || extractUrl(task.notes || "")),
+      gitlab: type === "issue" ? normalizeGitLabStatus(task.gitlab) : null,
       order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || "",
       attachments: normalizeAttachments(task.attachments),
@@ -2772,6 +2914,7 @@ function issueTask(title, project, owner, due, status, priority, next, notes) {
     priority,
     next,
     link: "",
+    gitlab: null,
     order: Date.now(),
     notes
   };
