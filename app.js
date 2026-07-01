@@ -187,7 +187,7 @@ function bindEvents() {
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
-  document.addEventListener("click", closeWorkflowMenuOnOutsideClick, true);
+  document.addEventListener("click", closeActionMenuOnOutsideClick, true);
   document.addEventListener("click", clearPendingDoneOnOtherClick);
   document.addEventListener("click", closeOwnerPickerOnOtherClick);
   document.addEventListener("click", closeProjectPickerOnOtherClick);
@@ -1729,11 +1729,11 @@ function wireWorkflowButtons() {
   });
 }
 
-function closeWorkflowMenuOnOutsideClick(event) {
-  const workflowMenu = els.workflowTopSlot.querySelector(".workflow-top-menu");
+function closeActionMenuOnOutsideClick(event) {
+  const openMenus = [...document.querySelectorAll("details.action-menu[open]")];
   const target = event.target instanceof Element ? event.target : null;
-  if (!workflowMenu?.open || target?.closest(".workflow-top-menu")) return;
-  workflowMenu.open = false;
+  if (!openMenus.length || openMenus.some((menu) => target && menu.contains(target))) return;
+  openMenus.forEach((menu) => { menu.open = false; });
   keepWorkflowMenuOpen = false;
   event.preventDefault();
   event.stopImmediatePropagation();
