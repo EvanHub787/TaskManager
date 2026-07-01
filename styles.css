@@ -988,7 +988,7 @@ textarea {
 .board {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(260px, 300px);
+  grid-auto-columns: minmax(320px, 380px);
   gap: 12px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -1080,12 +1080,26 @@ textarea {
 }
 
 .card-heading {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: flex-start;
-  gap: 10px;
+  display: block;
   margin: 0 0 8px;
+}
+
+.card-top-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 6px;
+}
+
+.card-issue-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }
 
 .task-card h4 {
@@ -1099,26 +1113,31 @@ textarea {
 }
 
 .card-side {
-  position: relative;
-  display: inline-flex;
+  display: flex;
+  flex: 0 1 min(46%, 132px);
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  max-width: 72px;
+  min-width: 0;
 }
 
 .owner-name {
   appearance: none;
+  display: block;
+  max-width: 100%;
   min-height: auto;
   padding: 0;
   border: 0;
   background: transparent;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.6;
   text-align: right;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .owner-name:hover {
@@ -1439,6 +1458,7 @@ textarea {
   border: 0;
   background: transparent;
   text-align: left;
+  white-space: pre-wrap;
 }
 
 .next-edit-button:hover {
@@ -1453,9 +1473,11 @@ textarea {
   padding: 0;
   border: 0;
   background: transparent;
-  color: inherit;
-  font: inherit;
+  color: #314038;
+  font-size: 13px;
+  line-height: 1.45;
   text-align: left;
+  white-space: pre-wrap;
 }
 
 .compact-next-button:hover {

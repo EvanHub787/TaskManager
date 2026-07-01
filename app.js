@@ -90,6 +90,7 @@ const els = {
   taskCompletedAt: document.querySelector("#taskCompletedAt"),
   taskPriority: document.querySelector("#taskPriority"),
   taskLinkedIssueId: document.querySelector("#taskLinkedIssueId"),
+  taskNextLabel: document.querySelector("#taskNextLabel"),
   taskNext: document.querySelector("#taskNext"),
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
@@ -180,6 +181,7 @@ function bindEvents() {
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
     syncCompletedAtField();
+    syncTaskNextLabel();
   });
   els.taskStatus.addEventListener("change", syncCompletedAtField);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
@@ -192,7 +194,7 @@ function bindEvents() {
   document.addEventListener("click", closeDuePickerOnOtherClick);
   document.addEventListener("click", closeNextEditorOnOtherClick);
   document.addEventListener("click", closePriorityPickerOnOtherClick);
-  document.addEventListener("click", markGitLabSeenFromIssueLink);
+  document.addEventListener("click", markGitLabSeenFromIssueLink, true);
   document.addEventListener("input", clearPendingDoneConfirmation);
   document.addEventListener("change", clearPendingDoneConfirmation);
   document.addEventListener("keydown", handleGlobalShortcuts);
@@ -626,6 +628,7 @@ function markGitLabSeenFromIssueLink(event) {
   state.tasks = state.tasks.map((item) => item.id === task.id
     ? { ...item, gitlab: { ...gitlab, seenUpdatedAt: gitlab.updatedAt }, updatedAt: new Date().toISOString() }
     : item);
+  document.querySelectorAll(`[data-issue-link-task="${CSS.escape(task.id)}"] .gitlab-update-dot`).forEach((dot) => dot.remove());
   lastStateSnapshot = serializeState(state);
   pendingMutationLabel = "";
   persistState();
@@ -1052,11 +1055,14 @@ function taskCard(task, enableDrag = false) {
   return `
     <article class="task-card ${urgencyClass} ${gitlabClass}" data-task-id="${task.id}" ${enableDrag && task.type === "issue" && !isDone(task) ? `draggable="true"` : ""}>
       <div class="card-heading">
-        <h4>${issueBadge}${title}</h4>
-        <div class="card-side">
-          <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
-          ${ownerMenu}
+        <div class="card-top-row">
+          <div class="card-issue-list">${issueBadge}</div>
+          <div class="card-side">
+            <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
+            ${ownerMenu}
+          </div>
         </div>
+        <h4>${title}</h4>
       </div>
       <div class="meta">${projectControl}<span class="meta-right">${stalledBadge}${dueText(task, task.type === "issue" && !isDone(task))}</span></div>
       ${nextAction}
@@ -2002,8 +2008,14 @@ function openTaskDialog(id, overrides = {}) {
   renderTaskAttachments();
   syncIssueLinkRequirement();
   syncCompletedAtField();
+  syncTaskNextLabel();
   els.dialog.showModal();
   autoResizeTaskNext();
+}
+
+function syncTaskNextLabel() {
+  const labelText = els.taskType.value === "issue" ? "イシュー詳細" : "次のアクション";
+  els.taskNextLabel.firstChild.textContent = labelText;
 }
 
 function handleTaskLinkInput() {
