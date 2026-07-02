@@ -877,12 +877,18 @@ textarea {
 .todo-detail-row p,
 .todo-detail-row span,
 .todo-detail-row .project-name,
-.todo-detail-row .compact-next-button,
 .todo-title-button {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.todo-detail-row .compact-next-button {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: pre-wrap;
 }
 
 .todo-title-button {
