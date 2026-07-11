@@ -89,6 +89,8 @@ const els = {
   taskCompletedAtLabel: document.querySelector("#taskCompletedAtLabel"),
   taskCompletedAt: document.querySelector("#taskCompletedAt"),
   taskPriority: document.querySelector("#taskPriority"),
+  taskRecurrenceLabel: document.querySelector("#taskRecurrenceLabel"),
+  taskRecurrence: document.querySelector("#taskRecurrence"),
   taskLinkedIssueId: document.querySelector("#taskLinkedIssueId"),
   taskNextLabel: document.querySelector("#taskNextLabel"),
   taskNext: document.querySelector("#taskNext"),
@@ -182,6 +184,7 @@ function bindEvents() {
     syncIssueLinkRequirement();
     syncCompletedAtField();
     syncTaskNextLabel();
+    syncRecurrenceField();
   });
   els.taskStatus.addEventListener("change", syncCompletedAtField);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
@@ -203,6 +206,7 @@ function bindEvents() {
 function fillStaticSelects() {
   els.taskType.innerHTML = `<option value="issue">Issue</option><option value="todo">Todo</option>`;
   els.taskPriority.innerHTML = priorities.map((priority) => `<option value="${priority}">${priority}</option>`).join("");
+  els.taskRecurrence.innerHTML = `<option value="">なし</option><option value="daily">毎日</option>`;
   fillStatusSelect("issue");
 }
 
@@ -214,6 +218,7 @@ function fillStatusSelect(type, selected) {
 
 function render() {
   state = migrateState(state);
+  ensureDailyRecurringTodos();
   syncMembersFromTasks();
   captureStateChange();
   renderWorkflowTopControl();
@@ -977,6 +982,7 @@ function compactTaskCard(task) {
   const projectControl = projectQuickControl(task);
   const nextAction = nextQuickControl(task, true);
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
+  const recurrenceBadge = task.recurrence === "daily" ? `<span class="recurrence-badge">毎日</span>` : "";
   return `
     <article class="todo-card dashboard-compact-card ${urgencyClass}" data-task-id="${task.id}">
       ${doneButton}
@@ -993,6 +999,7 @@ function compactTaskCard(task) {
           ${nextAction}
           ${projectControl}
           ${dueText(task, !isDone(task))}
+          ${recurrenceBadge}
           ${stalledBadge}
         </div>
       </div>
@@ -1010,6 +1017,7 @@ function todoCard(task, enableDrag = false) {
     : `<button class="todo-check done" data-reopen-todo="${task.id}" type="button" aria-label="Todoに戻す"></button>`;
   const projectControl = projectQuickControl(task);
   const nextAction = nextQuickControl(task, true);
+  const recurrenceBadge = task.recurrence === "daily" ? `<span class="recurrence-badge">毎日</span>` : "";
   return `
     <article class="todo-card ${urgencyClass}" data-task-id="${task.id}" ${enableDrag && !isDone(task) ? `draggable="true"` : ""}>
       ${doneButton}
@@ -1021,6 +1029,7 @@ function todoCard(task, enableDrag = false) {
         <div class="todo-detail-row">
           ${nextAction}
           ${projectControl}
+          ${recurrenceBadge}
         </div>
       </div>
     </article>
@@ -1998,6 +2007,7 @@ function openTaskDialog(id, overrides = {}) {
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
   els.taskDue.value = overrides.due || task?.due || todayOffset(3);
   els.taskPriority.value = overrides.priority || task?.priority || "中";
+  els.taskRecurrence.value = type === "todo" ? overrides.recurrence || task?.recurrence || "" : "";
   els.taskLinkedIssueId.value = overrides.linkedIssueId || task?.linkedIssueId || "";
   els.taskCompletedAt.value = overrides.completedAt || task?.completedAt || todayOffset(0);
   els.taskNext.value = overrides.next || task?.next || "";
@@ -2009,6 +2019,7 @@ function openTaskDialog(id, overrides = {}) {
   syncIssueLinkRequirement();
   syncCompletedAtField();
   syncTaskNextLabel();
+  syncRecurrenceField();
   els.dialog.showModal();
   autoResizeTaskNext();
 }
@@ -2016,6 +2027,12 @@ function openTaskDialog(id, overrides = {}) {
 function syncTaskNextLabel() {
   const labelText = els.taskType.value === "issue" ? "イシュー詳細" : "次のアクション";
   els.taskNextLabel.firstChild.textContent = labelText;
+}
+
+function syncRecurrenceField() {
+  const isTodo = els.taskType.value === "todo";
+  els.taskRecurrenceLabel.hidden = !isTodo;
+  if (!isTodo) els.taskRecurrence.value = "";
 }
 
 function handleTaskLinkInput() {
@@ -2223,12 +2240,14 @@ function saveTask(event) {
   const id = els.taskId.value || crypto.randomUUID();
   const type = els.taskType.value;
   const existingTask = state.tasks.find((item) => item.id === id);
+  const previousRecurrenceKey = existingTask?.recurrence === "daily" ? existingTask.recurrenceKey : "";
   const link = normalizeTaskLinkInput(els.taskLink.value, type);
   const status = els.taskStatus.value;
   const doneStatus = type === "todo" ? todoDoneStatus : completedStatus;
   const completedAt = status === doneStatus
     ? els.taskCompletedAt.value || existingTask?.completedAt || todayOffset(0)
     : "";
+  const recurrence = type === "todo" ? els.taskRecurrence.value : "";
 
   if (type === "issue" && !extractIssueNumber(link)) {
     els.taskLink.setCustomValidity("Issue URL には Issue 番号を含めてください。");
@@ -2251,6 +2270,8 @@ function saveTask(event) {
     due: els.taskDue.value,
     status,
     priority: els.taskPriority.value,
+    recurrence,
+    recurrenceKey: recurrence ? existingTask?.recurrenceKey || crypto.randomUUID() : "",
     linkedIssueId: type === "todo" ? els.taskLinkedIssueId.value : "",
     completedAt,
     next: els.taskNext.value.trim(),
@@ -2270,6 +2291,12 @@ function saveTask(event) {
   } else {
     markStateMutation(`「${task.title}」を追加`);
     state.tasks.unshift(task);
+  }
+
+  if (previousRecurrenceKey && !recurrence) {
+    state.tasks = state.tasks.map((item) => item.recurrenceKey === previousRecurrenceKey
+      ? { ...item, recurrence: "", recurrenceKey: "" }
+      : item);
   }
 
   closeTaskDialog();
@@ -2871,20 +2898,24 @@ function migrateState(rawState) {
 
   migrated.tasks = migrated.tasks.map((task, index) => {
     const type = task.type === "todo" ? "todo" : "issue";
+    const taskId = task.id || crypto.randomUUID();
     const fallbackStatus = type === "todo" ? todoOpenStatus : migrated.workflow[0];
     const mappedStatus = statusMap[task.status] || task.status || fallbackStatus;
     const validIssueStatus = [...migrated.workflow, completedStatus].includes(mappedStatus);
     const validTodoStatus = [todoOpenStatus, todoDoneStatus].includes(mappedStatus);
     const legacyTodoPlan = type === "issue" && Boolean(task.todoPlan || task.todayPlan);
+    const recurrence = type === "todo" && task.recurrence === "daily" ? "daily" : "";
     return {
       ...task,
-      id: task.id || crypto.randomUUID(),
+      id: taskId,
       type,
       project: task.project || (type === "todo" ? "Todo" : "Issue"),
       owner: task.owner || migrated.members[0] || "自分",
       due: task.due || todayOffset(3),
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
       priority: priorities.includes(task.priority) ? task.priority : "中",
+      recurrence,
+      recurrenceKey: recurrence ? task.recurrenceKey || taskId : "",
       todoPlan: undefined,
       todayPlan: undefined,
       legacyTodoPlan,
@@ -2913,6 +2944,8 @@ function migrateState(rawState) {
       due: todayOffset(0),
       status: todoOpenStatus,
       priority: issue.priority,
+      recurrence: "",
+      recurrenceKey: "",
       next: "この Issue を調査する。",
       link: issue.link,
       linkedIssueId: issue.id,
@@ -2931,6 +2964,48 @@ function migrateState(rawState) {
   migrated.workflow = [...new Set(migrated.workflow.map(normalizeName).filter(Boolean))];
   if (!migrated.workflow.length) migrated.workflow = defaultWorkflow;
   return migrated;
+}
+
+function ensureDailyRecurringTodos() {
+  const today = todayOffset(0);
+  const templates = new Map();
+  state.tasks
+    .filter((task) => task.type === "todo" && task.recurrence === "daily" && task.recurrenceKey)
+    .forEach((task) => {
+      const current = templates.get(task.recurrenceKey);
+      if (!current || String(task.updatedAt || task.createdAt || "") > String(current.updatedAt || current.createdAt || "")) {
+        templates.set(task.recurrenceKey, task);
+      }
+    });
+
+  if (!templates.size) return;
+
+  const existingTodayKeys = new Set(
+    state.tasks
+      .filter((task) => task.type === "todo" && task.recurrence === "daily" && task.due === today)
+      .map((task) => task.recurrenceKey)
+      .filter(Boolean)
+  );
+
+  const now = new Date().toISOString();
+  const generated = [];
+  templates.forEach((template, recurrenceKey) => {
+    if (existingTodayKeys.has(recurrenceKey)) return;
+    generated.push({
+      ...template,
+      id: crypto.randomUUID(),
+      due: today,
+      status: todoOpenStatus,
+      completedAt: "",
+      recurrence: "daily",
+      recurrenceKey,
+      order: Date.now() + generated.length,
+      createdAt: now,
+      updatedAt: now
+    });
+  });
+
+  if (generated.length) state.tasks.unshift(...generated);
 }
 
 function sortByUrgency(a, b) {
@@ -3078,6 +3153,8 @@ function todoTask(title, owner, due, priority, next, notes) {
     due,
     status: todoOpenStatus,
     priority,
+    recurrence: "",
+    recurrenceKey: "",
     next,
     link: "",
     order: Date.now(),
