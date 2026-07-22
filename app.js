@@ -180,6 +180,7 @@ function bindEvents() {
   els.closeImagePreview.addEventListener("click", closeTaskAttachmentPreview);
   els.imagePreviewDialog.addEventListener("click", closeTaskAttachmentPreviewFromBackdrop);
   els.taskType.addEventListener("change", () => {
+    if (!els.taskId.value) els.taskDue.value = defaultDueForType(els.taskType.value);
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
     syncCompletedAtField();
@@ -2005,7 +2006,7 @@ function openTaskDialog(id, overrides = {}) {
   els.taskTitle.value = overrides.title || task?.title || "";
   els.taskProject.value = overrides.project || task?.project || (type === "todo" ? "Todo" : "Issue");
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
-  els.taskDue.value = overrides.due || task?.due || todayOffset(3);
+  els.taskDue.value = overrides.due || task?.due || defaultDueForType(type);
   els.taskPriority.value = overrides.priority || task?.priority || "中";
   els.taskRecurrence.value = type === "todo" ? overrides.recurrence || task?.recurrence || "" : "";
   els.taskLinkedIssueId.value = overrides.linkedIssueId || task?.linkedIssueId || "";
@@ -2022,6 +2023,18 @@ function openTaskDialog(id, overrides = {}) {
   syncRecurrenceField();
   els.dialog.showModal();
   autoResizeTaskNext();
+}
+
+function defaultDueForType(type) {
+  return type === "todo" ? todayOffset(0) : todayOffset(3);
+}
+
+function defaultOrderForNewTask(type) {
+  if (type !== "todo") return Date.now();
+  const openTodoOrders = state.tasks
+    .filter((task) => task.type === "todo" && !isDone(task) && Number.isFinite(task.order))
+    .map((task) => task.order);
+  return openTodoOrders.length ? Math.min(...openTodoOrders) - 1 : 0;
 }
 
 function syncTaskNextLabel() {
@@ -2248,6 +2261,7 @@ function saveTask(event) {
     ? els.taskCompletedAt.value || existingTask?.completedAt || todayOffset(0)
     : "";
   const recurrence = type === "todo" ? els.taskRecurrence.value : "";
+  const order = Number.isFinite(existingTask?.order) ? existingTask.order : defaultOrderForNewTask(type);
 
   if (type === "issue" && !extractIssueNumber(link)) {
     els.taskLink.setCustomValidity("Issue URL には Issue 番号を含めてください。");
@@ -2277,7 +2291,7 @@ function saveTask(event) {
     next: els.taskNext.value.trim(),
     link,
     gitlab: type === "issue" && existingTask?.link === link ? normalizeGitLabStatus(existingTask.gitlab) : null,
-    order: Number.isFinite(existingTask?.order) ? existingTask.order : Date.now(),
+    order,
     notes: els.taskNotes.value.trim(),
     attachments: normalizeAttachments(currentTaskAttachments),
     createdAt: existingTask?.createdAt || new Date().toISOString(),
