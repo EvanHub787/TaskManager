@@ -53,6 +53,7 @@ let toastTimer = null;
 let appDatabase = null;
 let gitlabRefreshing = false;
 let gitlabTitleRequestId = 0;
+let lastManualTaskTitleValue = "";
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -172,6 +173,7 @@ function bindEvents() {
   els.undoBtn.addEventListener("click", undoLastChange);
   els.taskLink.addEventListener("input", handleTaskLinkInput);
   els.taskLink.addEventListener("blur", fetchIssueTitleFromLink);
+  els.taskTitle.addEventListener("input", handleTaskTitleInput);
   els.taskNext.addEventListener("input", autoResizeTaskNext);
   els.taskImages.addEventListener("change", handleTaskImageFiles);
   els.taskNotes.addEventListener("paste", handleTaskImagePaste);
@@ -181,6 +183,7 @@ function bindEvents() {
   els.imagePreviewDialog.addEventListener("click", closeTaskAttachmentPreviewFromBackdrop);
   els.taskType.addEventListener("change", () => {
     if (!els.taskId.value) els.taskDue.value = defaultDueForType(els.taskType.value);
+    if (els.taskType.value === "todo") clearAutoFilledIssueTitle();
     fillStatusSelect(els.taskType.value);
     syncIssueLinkRequirement();
     syncCompletedAtField();
@@ -2002,8 +2005,10 @@ function openTaskDialog(id, overrides = {}) {
   els.createTodoFromIssueBtn.hidden = !(task?.type === "issue" && !isDone(task));
   els.taskId.value = task?.id || "";
   els.taskType.value = type;
+  clearAutoIssueTitleFlag();
   fillStatusSelect(type, overrides.status || task?.status);
   els.taskTitle.value = overrides.title || task?.title || "";
+  lastManualTaskTitleValue = els.taskTitle.value;
   els.taskProject.value = overrides.project || task?.project || (type === "todo" ? "Todo" : "Issue");
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
   els.taskDue.value = overrides.due || task?.due || defaultDueForType(type);
@@ -2037,6 +2042,13 @@ function defaultOrderForNewTask(type) {
   return openTodoOrders.length ? Math.min(...openTodoOrders) - 1 : 0;
 }
 
+function taskTitleValueForSave(type, existingTask) {
+  if (type === "todo" && !existingTask && lastManualTaskTitleValue.trim()) {
+    return lastManualTaskTitleValue.trim();
+  }
+  return els.taskTitle.value.trim();
+}
+
 function syncTaskNextLabel() {
   const labelText = els.taskType.value === "issue" ? "イシュー詳細" : "次のアクション";
   els.taskNextLabel.firstChild.textContent = labelText;
@@ -2051,7 +2063,13 @@ function syncRecurrenceField() {
 function handleTaskLinkInput() {
   els.taskLink.setCustomValidity("");
   window.clearTimeout(Number(els.taskLink.dataset.titleTimer || 0));
+  if (els.taskType.value !== "issue") return;
   els.taskLink.dataset.titleTimer = String(window.setTimeout(fetchIssueTitleFromLink, 650));
+}
+
+function handleTaskTitleInput() {
+  lastManualTaskTitleValue = els.taskTitle.value;
+  clearAutoIssueTitleFlag();
 }
 
 async function fetchIssueTitleFromLink() {
@@ -2063,14 +2081,32 @@ async function fetchIssueTitleFromLink() {
   const requestId = ++gitlabTitleRequestId;
   const result = await fetchGitLabIssueStatusWithSavedToken(link, new Date().toISOString(), true);
   if (requestId !== gitlabTitleRequestId) return;
+  if (els.taskType.value !== "issue") return;
   if (result.error) {
     showToast(`GitLab タイトル取得に失敗しました: ${result.error}`, false);
     return;
   }
   if (result.title && !els.taskTitle.value.trim()) {
     els.taskTitle.value = result.title;
+    els.taskTitle.dataset.autoIssueTitle = "true";
+    els.taskTitle.dataset.autoIssueTitleValue = result.title;
     showToast("GitLab の Issue タイトルを入力しました。", false);
   }
+}
+
+function clearAutoIssueTitleFlag() {
+  delete els.taskTitle.dataset.autoIssueTitle;
+  delete els.taskTitle.dataset.autoIssueTitleValue;
+}
+
+function clearAutoFilledIssueTitle() {
+  if (els.taskTitle.dataset.autoIssueTitle !== "true") return;
+  if (els.taskTitle.value !== els.taskTitle.dataset.autoIssueTitleValue) {
+    clearAutoIssueTitleFlag();
+    return;
+  }
+  els.taskTitle.value = "";
+  clearAutoIssueTitleFlag();
 }
 
 async function fetchGitLabIssueStatusWithSavedToken(link, checkedAt, promptForToken = false) {
@@ -2262,6 +2298,7 @@ function saveTask(event) {
     : "";
   const recurrence = type === "todo" ? els.taskRecurrence.value : "";
   const order = Number.isFinite(existingTask?.order) ? existingTask.order : defaultOrderForNewTask(type);
+  const title = taskTitleValueForSave(type, existingTask);
 
   if (type === "issue" && !extractIssueNumber(link)) {
     els.taskLink.setCustomValidity("Issue URL には Issue 番号を含めてください。");
@@ -2278,7 +2315,7 @@ function saveTask(event) {
   const task = {
     id,
     type,
-    title: els.taskTitle.value.trim(),
+    title,
     project: els.taskProject.value.trim() || (type === "todo" ? "Todo" : "Issue"),
     owner: els.taskOwner.value,
     due: els.taskDue.value,
