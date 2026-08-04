@@ -108,6 +108,7 @@ const els = {
   closeDialog: document.querySelector("#closeDialog"),
   cancelDialog: document.querySelector("#cancelDialog"),
   projectList: document.querySelector("#projectList"),
+  ownerList: document.querySelector("#ownerList"),
   utilityDialog: document.querySelector("#utilityDialog"),
   utilityTitle: document.querySelector("#utilityTitle"),
   utilityContent: document.querySelector("#utilityContent"),
@@ -297,7 +298,14 @@ async function saveDataFile() {
 }
 
 function renderFilterOptions() {
-  els.taskOwner.innerHTML = state.members.map((member) => `<option value="${escapeHtml(member)}">${escapeHtml(member)}</option>`).join("");
+  els.ownerList.innerHTML = ownerCandidates().map((owner) => `<option value="${escapeHtml(owner)}"></option>`).join("");
+}
+
+function ownerCandidates() {
+  return [...new Set([
+    ...state.members,
+    ...state.tasks.map((task) => task.owner)
+  ].map(normalizeName).filter(Boolean))].sort();
 }
 
 function renderProjectList() {
@@ -978,9 +986,13 @@ function compactTaskCard(task) {
       : `<span class="todo-check done" aria-label="完了済み"></span>`;
   const ownerMenu = ownerPickerTaskId === task.id
     ? `<div class="owner-menu" role="menu">
-        ${state.members.map((member) => `
+        ${ownerCandidates().map((member) => `
           <button class="owner-choice${member === task.owner ? " active" : ""}" data-owner-choice="${escapeHtml(member)}" data-owner-task="${task.id}" type="button" role="menuitem">${escapeHtml(member)}</button>
         `).join("")}
+        <div class="owner-custom-row">
+          <input class="quick-menu-input" data-owner-input="${task.id}" list="ownerList" maxlength="60" placeholder="担当者名">
+          <button class="tiny-button" data-owner-save="${task.id}" type="button">保存</button>
+        </div>
       </div>`
     : "";
   const projectControl = projectQuickControl(task);
@@ -1056,9 +1068,13 @@ function taskCard(task, enableDrag = false) {
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
   const ownerMenu = ownerPickerTaskId === task.id
     ? `<div class="owner-menu" role="menu">
-        ${state.members.map((member) => `
+        ${ownerCandidates().map((member) => `
           <button class="owner-choice${member === task.owner ? " active" : ""}" data-owner-choice="${escapeHtml(member)}" data-owner-task="${task.id}" type="button" role="menuitem">${escapeHtml(member)}</button>
         `).join("")}
+        <div class="owner-custom-row">
+          <input class="quick-menu-input" data-owner-input="${task.id}" list="ownerList" maxlength="60" placeholder="担当者名">
+          <button class="tiny-button" data-owner-save="${task.id}" type="button">保存</button>
+        </div>
       </div>`
     : "";
   const projectControl = projectQuickControl(task);
@@ -1277,14 +1293,23 @@ function wireTaskButtons(root) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const taskId = button.dataset.ownerTask;
-      const owner = button.dataset.ownerChoice;
-      if (!taskId || !owner) return;
-      updateTask(taskId, { owner }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の担当者を変更`);
-      ownerPickerTaskId = "";
-      pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
-      render();
+      saveOwnerChoice(button.dataset.ownerTask, button.dataset.ownerChoice);
+    });
+  });
+  root.querySelectorAll("[data-owner-save]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const input = root.querySelector(`[data-owner-input="${CSS.escape(button.dataset.ownerSave)}"]`);
+      saveOwnerChoice(button.dataset.ownerSave, input?.value);
+    });
+  });
+  root.querySelectorAll("[data-owner-input]").forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      saveOwnerChoice(input.dataset.ownerInput, input.value);
     });
   });
   root.querySelectorAll("[data-project-input]").forEach((input) => {
@@ -2369,7 +2394,7 @@ function clearPendingDoneOnOtherClick(event) {
 }
 
 function closeOwnerPickerOnOtherClick(event) {
-  if (!ownerPickerTaskId || event.target.closest("[data-owner-picker], [data-owner-choice]")) return;
+  if (!ownerPickerTaskId || event.target.closest("[data-owner-picker], [data-owner-choice], [data-owner-input], [data-owner-save], .owner-menu")) return;
   ownerPickerTaskId = "";
   render();
 }
@@ -2468,6 +2493,16 @@ function updateTask(id, patch, label = "") {
   if (!task) return;
   markStateMutation(label || taskMutationLabel(task, patch));
   state.tasks = state.tasks.map((item) => item.id === id ? touchTask(item, patch) : item);
+}
+
+function saveOwnerChoice(taskId, value) {
+  const owner = normalizeName(value);
+  if (!taskId || !owner) return;
+  updateTask(taskId, { owner }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の担当者を変更`);
+  ownerPickerTaskId = "";
+  pendingDoneTaskId = "";
+  pendingConvertTaskId = "";
+  render();
 }
 
 function touchTask(task, patch = {}) {
@@ -2638,7 +2673,7 @@ function searchableTaskText(task) {
 }
 
 function syncMembersFromTasks() {
-  state.members = [...new Set([...state.members, ...state.tasks.map((task) => task.owner)])].filter(Boolean);
+  state.members = [...new Set(state.members.map(normalizeName).filter(Boolean))];
 }
 
 function normalizeName(value) {

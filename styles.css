@@ -1234,6 +1234,19 @@ textarea {
   font-size: 12px;
 }
 
+.owner-custom-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.owner-custom-row .quick-menu-input {
+  margin-bottom: 0;
+}
+
 .owner-choice {
   width: 100%;
   min-height: 30px;

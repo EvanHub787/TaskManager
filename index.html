@@ -147,7 +147,7 @@
       <div class="form-grid task-meta-grid">
         <label>種別<select id="taskType" required></select></label>
         <label>案件<input id="taskProject" list="projectList" required maxlength="60"></label>
-        <label>担当者<select id="taskOwner" required></select></label>
+        <label>担当者<input id="taskOwner" list="ownerList" required maxlength="60"></label>
         <label>期限<input id="taskDue" type="date" required></label>
         <label>ステータス<select id="taskStatus" required></select></label>
         <label id="taskCompletedAtLabel" hidden>完了日<input id="taskCompletedAt" type="date"></label>
@@ -227,6 +227,7 @@
   </div>
 
   <datalist id="projectList"></datalist>
+  <datalist id="ownerList"></datalist>
   <script src="app.js?v=20260620-productivity"></script>
 </body>
 
