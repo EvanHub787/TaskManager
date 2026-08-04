@@ -734,6 +734,7 @@ function renderProjects() {
 }
 
 function renderPeople() {
+  const memberSet = new Set(state.members.map(normalizeName));
   const rows = state.members.map((member) => {
     const tasks = state.tasks.filter((task) => task.owner === member);
     const open = tasks.filter((task) => !isDone(task));
@@ -750,6 +751,41 @@ function renderPeople() {
       </tr>
     `;
   }).join("");
+  const externalIssueGroups = groupBy(
+    state.tasks.filter((task) => task.type === "issue" && !isDone(task) && !memberSet.has(normalizeName(task.owner))),
+    "owner"
+  );
+  const externalRows = Object.entries(externalIssueGroups)
+    .sort(([a], [b]) => a.localeCompare(b, "ja-JP"))
+    .map(([owner, tasks]) => {
+      const sorted = tasks.sort(sortByUrgency);
+      const overdue = sorted.filter((task) => daysUntil(task.due) < 0);
+      const high = sorted.filter((task) => task.priority === "高");
+      const stalled = sorted.filter(isTaskStalled);
+      const lead = sorted[0];
+      return `
+        <tr>
+          <td><button class="table-link" data-filter-member="${escapeHtml(owner)}" type="button">${escapeHtml(owner)}</button></td>
+          <td>${sorted.length}</td>
+          <td>${overdue.length}</td>
+          <td>${high.length}</td>
+          <td>${stalled.length}</td>
+          <td>
+            <strong>${escapeHtml(lead.title)}</strong>
+            <div class="table-subtext">${escapeHtml(lead.project)} · ${escapeHtml(formatDue(lead.due))} · ${escapeHtml(lead.status)}</div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  const externalIssueSection = externalRows
+    ? `
+      <div class="section-title compact-section-title"><h3>チーム外担当 Issue</h3><span class="tag">${Object.keys(externalIssueGroups).length}</span></div>
+      <table class="list-table"><thead><tr><th>担当者</th><th>Issue</th><th>期限超過</th><th>高優先度</th><th>停滞</th><th>代表 Issue</th></tr></thead><tbody>${externalRows}</tbody></table>
+    `
+    : `
+      <div class="section-title compact-section-title"><h3>チーム外担当 Issue</h3><span class="tag">0</span></div>
+      ${emptyState("チーム外担当の未完了 Issue はありません")}
+    `;
 
   const memberRows = state.members.map((member, index) => {
     const assigned = state.tasks.filter((task) => task.owner === member).length;
@@ -775,6 +811,7 @@ function renderPeople() {
       </div>
     </details>
     <table class="list-table"><thead><tr><th>担当者</th><th>未完了</th><th>Issue</th><th>Todo</th><th>期限超過</th></tr></thead><tbody>${rows}</tbody></table>
+    ${externalIssueSection}
   `;
   wireMemberButtons();
 }

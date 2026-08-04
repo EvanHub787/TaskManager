@@ -1760,6 +1760,13 @@ textarea {
   font-size: 12px;
 }
 
+.table-subtext {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .table-link {
   min-height: auto;
   padding: 0;
