@@ -302,10 +302,13 @@ function renderFilterOptions() {
 }
 
 function ownerCandidates() {
-  return [...new Set([
-    ...state.members,
-    ...state.tasks.map((task) => task.owner)
-  ].map(normalizeName).filter(Boolean))].sort();
+  const teamMembers = [...new Set(state.members.map(normalizeName).filter(Boolean))];
+  const teamMemberSet = new Set(teamMembers);
+  const externalOwners = [...new Set(state.tasks
+    .map((task) => normalizeName(task.owner))
+    .filter((owner) => owner && !teamMemberSet.has(owner))
+  )].sort((a, b) => a.localeCompare(b, "ja-JP"));
+  return [...teamMembers, ...externalOwners];
 }
 
 function renderProjectList() {
