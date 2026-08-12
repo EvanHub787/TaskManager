@@ -23,6 +23,7 @@
           <h1>TaskManager</h1>
           <p>CEMenu-T</p>
         </div>
+        <span id="syncStatus" class="sync-status" title="同期状態"></span>
       </div>
 
       <nav class="nav-tabs" aria-label="ビュー切替">
@@ -62,17 +63,21 @@
             <h2 id="pageTitle">作業概要</h2>
           </div>
           <div class="actions">
-            <div id="workflowTopSlot"></div>
             <details class="action-menu">
-              <summary class="secondary-button">データ管理</summary>
+              <summary class="secondary-button icon-button data-menu-button" title="データ管理" aria-label="データ管理">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path>
+                  <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2.1 2.1 0 0 1-2.97 2.97l-.05-.05a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.09 1.65V21a2.1 2.1 0 0 1-4.2 0v-.08A1.8 1.8 0 0 0 8.44 19.3a1.8 1.8 0 0 0-1.98.36l-.05.05a2.1 2.1 0 0 1-2.97-2.97l.05-.05A1.8 1.8 0 0 0 3.85 14.7a1.8 1.8 0 0 0-1.65-1.08H2a2.1 2.1 0 0 1 0-4.2h.08A1.8 1.8 0 0 0 3.7 8.34a1.8 1.8 0 0 0-.36-1.98l-.05-.05a2.1 2.1 0 0 1 2.97-2.97l.05.05a1.8 1.8 0 0 0 1.98.36h.02A1.8 1.8 0 0 0 9.4 2.1V2a2.1 2.1 0 0 1 4.2 0v.08a1.8 1.8 0 0 0 1.08 1.65h.02a1.8 1.8 0 0 0 1.98-.36l.05-.05a2.1 2.1 0 0 1 2.97 2.97l-.05.05a1.8 1.8 0 0 0-.36 1.98v.02a1.8 1.8 0 0 0 1.65 1.08H21a2.1 2.1 0 0 1 0 4.2h-.08A1.8 1.8 0 0 0 19.4 15Z"></path>
+                </svg>
+              </summary>
               <div class="action-menu-content">
                 <button id="openDataFileBtn" class="menu-item" type="button">
-                  <span>開く</span>
-                  <small>データファイルを開く</small>
+                  <span>開く / 同期開始</span>
+                  <small>共有 JSON ファイルを開いて自動同期</small>
                 </button>
                 <button id="saveDataFileBtn" class="menu-item" type="button">
-                  <span>保存</span>
-                  <small>データファイルへ保存</small>
+                  <span>新規保存</span>
+                  <small>新しいファイルへ保存して同期開始</small>
                 </button>
                 <button id="exportBtn" class="menu-item" type="button">
                   <span>エクスポート</span>
@@ -83,6 +88,15 @@
                   <small>JSON から読み込む</small>
                   <input id="importFile" type="file" accept="application/json">
                 </label>
+                <div class="menu-separator"></div>
+                <button id="exportExcelBtn" class="menu-item" type="button">
+                  <span>Issue を Excel 出力</span>
+                  <small>Issue 一覧を CSV（Excel 対応）で書き出す</small>
+                </button>
+                <button id="exportRcaCsvBtn" class="menu-item" type="button">
+                  <span>Issue_RCA管理 用CSV</span>
+                  <small>品質管理表へ貼り付ける初期行を出力</small>
+                </button>
                 <div class="menu-separator"></div>
                 <button id="dailyReportBtn" class="menu-item" type="button">
                   <span>日報を作成</span>
@@ -103,6 +117,8 @@
                 <div id="storageUsage" class="storage-usage">保存容量を確認中...</div>
               </div>
             </details>
+            <div id="workflowTopSlot"></div>
+            <span class="spacer"></span>
             <button id="addTaskBtn" class="primary-button" type="button">
               <span>＋</span>新規
             </button>
@@ -138,31 +154,45 @@
           </svg>
         </button>
       </div>
-      <input id="taskId" type="hidden">
-      <label class="full-label">Issue URL / Issue 番号<textarea id="taskLink" rows="2" maxlength="900"
-          placeholder="https://example.com/issues/123"></textarea></label>
-      <label class="full-label title-label">タスク名<input id="taskTitle" required maxlength="80"></label>
-      <label id="taskNextLabel" class="full-label">次のアクション<textarea id="taskNext" rows="3" maxlength="220"></textarea></label>
-      <input id="taskLinkedIssueId" type="hidden">
-      <div class="form-grid task-meta-grid">
-        <label>種別<select id="taskType" required></select></label>
-        <label>案件<input id="taskProject" list="projectList" required maxlength="60"></label>
-        <label>担当者<input id="taskOwner" list="ownerList" required maxlength="60"></label>
-        <label>期限<input id="taskDue" type="date" required></label>
-        <label>ステータス<select id="taskStatus" required></select></label>
-        <label id="taskCompletedAtLabel" hidden>完了日<input id="taskCompletedAt" type="date"></label>
-        <label>優先度<select id="taskPriority" required></select></label>
-        <label id="taskRecurrenceLabel">繰り返し<select id="taskRecurrence"></select></label>
-      </div>
-      <label class="full-label">メモ<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
-      <div class="attachment-panel">
-        <div class="attachment-toolbar">
-          <label class="file-button attachment-add">画像追加
-            <input id="taskImages" type="file" accept="image/*" multiple>
-          </label>
-          <span class="attachment-help">メモ欄へ画像を貼り付けても追加できます</span>
+      <div class="dialog-body">
+        <input id="taskId" type="hidden">
+        <label id="taskLinkLabel" class="full-label" hidden>Issue URL / Issue 番号<textarea id="taskLink" rows="2"
+            maxlength="900" placeholder="https://example.com/issues/123"></textarea></label>
+        <label class="full-label title-label">タスク名<input id="taskTitle" required maxlength="80"></label>
+        <label id="taskNextLabel" class="full-label">次のアクション<textarea id="taskNext" rows="3"
+            maxlength="220"></textarea></label>
+        <input id="taskLinkedIssueId" type="hidden">
+        <div class="form-grid task-meta-grid">
+          <label>種別<select id="taskType" required></select></label>
+          <label>案件<input id="taskProject" list="projectList" required maxlength="60"></label>
+          <label>担当者<input id="taskOwner" list="ownerList" required maxlength="60"></label>
+          <label>期限<input id="taskDue" type="date" required></label>
+          <label>ステータス<select id="taskStatus" required></select></label>
+          <label id="taskCompletedAtLabel" hidden>完了日<input id="taskCompletedAt" type="date"></label>
+          <label>優先度<select id="taskPriority" required></select></label>
+          <label id="taskRecurrenceLabel">繰り返し<select id="taskRecurrence"></select></label>
         </div>
-        <div id="taskAttachmentList" class="attachment-list"></div>
+        <fieldset id="qualityAnalysisSection" class="quality-section">
+          <legend>品質分析</legend>
+          <div class="form-grid task-meta-grid">
+            <label>原因・対策分析<select id="qualityAnalysisStatus"></select></label>
+            <label>経路タイプ<select id="qualityRouteType"></select></label>
+            <label>関連範囲<select id="qualityScope"></select></label>
+            <label>再現性<select id="qualityReproducibility"></select></label>
+            <label>外部依存<select id="qualityExternalDependency"></select></label>
+            <label>発見フェーズ<select id="qualityDiscoveryPhase"></select></label>
+          </div>
+        </fieldset>
+        <label class="full-label">メモ<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
+        <div class="attachment-panel">
+          <div class="attachment-toolbar">
+            <label class="file-button attachment-add">画像追加
+              <input id="taskImages" type="file" accept="image/*" multiple>
+            </label>
+            <span class="attachment-help">メモ欄へ画像を貼り付けても追加できます</span>
+          </div>
+          <div id="taskAttachmentList" class="attachment-list"></div>
+        </div>
       </div>
       <div class="dialog-actions">
         <button id="deleteTaskBtn" class="danger-button" type="button">削除</button>
@@ -191,7 +221,9 @@
       <div class="dialog-header">
         <h3 id="utilityTitle"></h3>
         <button id="closeUtilityDialog" class="icon-button plain" type="button" aria-label="閉じる">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+          <svg viewBox="0 0 24 24">
+            <path d="M6 6l12 12M18 6 6 18"></path>
+          </svg>
         </button>
       </div>
       <div id="utilityContent" class="utility-content"></div>
@@ -202,9 +234,14 @@
   <dialog id="endDayDialog" class="utility-dialog">
     <form id="endDayForm" class="utility-shell">
       <div class="dialog-header">
-        <div><h3>Todo 日次整理</h3><p class="dialog-description">未完了 Todo の翌日の扱いをまとめて決めます。</p></div>
+        <div>
+          <h3>Todo 日次整理</h3>
+          <p class="dialog-description">未完了 Todo の翌日の扱いをまとめて決めます。</p>
+        </div>
         <button id="closeEndDayDialog" class="icon-button plain" type="button" aria-label="閉じる">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+          <svg viewBox="0 0 24 24">
+            <path d="M6 6l12 12M18 6 6 18"></path>
+          </svg>
         </button>
       </div>
       <div id="endDayList" class="end-day-list"></div>
@@ -228,7 +265,7 @@
 
   <datalist id="projectList"></datalist>
   <datalist id="ownerList"></datalist>
-  <script src="app.js?v=20260620-productivity"></script>
+  <script src="app.js?v=20260808-quality-hotfix"></script>
 </body>
 
 </html>

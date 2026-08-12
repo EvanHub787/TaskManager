@@ -4,6 +4,14 @@ const todoOpenStatus = "未対応";
 const todoDoneStatus = "完了";
 const priorities = ["高", "中", "低"];
 const defaultMembers = ["自分", "メンバーA", "メンバーB", "メンバーC", "メンバーD", "メンバーE"];
+const qualityRouteTypes = ["正常系", "異常系", "境界条件"];
+const qualityScopes = ["単機能", "機能間連携", "システム全体"];
+const qualityReproducibility = ["必現", "高確率", "低確率", "再現不可"];
+const qualityExternalDependencies = ["なし", "カメラ", "通信", "装置", "ネットワーク", "その他"];
+const qualityDiscoveryPhases = ["単体テスト", "結合テスト", "社内検証", "顧客テスト", "現地"];
+const qualityAnalysisStatusOptions = ["未確認", "記載完了"];
+const relatedIssueTypes = ["主Issue", "関連Issue", "横展開", "同根因"];
+const selfMemberDefault = "自分";
 const storageKey = "follow-manager-v1";
 const historyKey = "follow-manager-history-v1";
 const gitlabTokenKey = "task-manager-gitlab-token";
@@ -18,11 +26,30 @@ const sampleTasks = [
   issueTask("Issue 対応フローを確認", "チーム管理", "自分", todayOffset(0), "調査中", "高", "Issue を調査、修正、テスト、MR の流れで管理できるか確認する。", "Issue 画面でフローをカスタマイズできます。"),
   issueTask("顧客フィードバック画面の不具合", "顧客案件", "メンバーA", todayOffset(2), "修正中", "高", "発生条件を特定し、修正後に MR を作成する。", ""),
   issueTask("ログインフローの回帰テスト", "品質改善", "メンバーB", todayOffset(1), "テスト中", "中", "テスト観点に沿って修正影響範囲を確認する。", ""),
+  issueTask("A 機能異常後に B 実行でエラー", "品質分析デモ", "顧客", todayOffset(1), "調査中", "高", "A 機能の異常終了後に状態が残り、B 実行時にエラーになる組み合わせを確認する。", "デモ Issue: 状態未クリアと異常組み合わせテスト不足を確認するためのサンプルです。", {
+    routeType: "異常系",
+    scope: "機能間連携",
+    reproducibility: "必現",
+    externalDependency: "なし",
+    discoveryPhase: "結合テスト",
+    analysisStatus: "未確認"
+  }),
+  issueTask("カメラスキャンが低確率で失敗する", "品質分析デモ", "顧客", todayOffset(2), "修正中", "中", "カメラ入力の低確率失敗条件をログと再試行動作から切り分ける。", "デモ Issue: カメラ依存、顧客テスト発見、テスト回数不足のサンプルです。", {
+    routeType: "異常系",
+    scope: "単機能",
+    reproducibility: "低確率",
+    externalDependency: "カメラ",
+    discoveryPhase: "顧客テスト",
+    analysisStatus: "記載完了"
+  }),
   todoTask("顧客からの一時依頼 memo を整理", "自分", todayOffset(1), "中", "txt のメモを Todo に分解し、Issue 化するか判断する。", "")
 ];
 
 let state = migrateState(loadState());
 let dataFileHandle = null;
+let syncPollingTimer = null;
+let syncFileSnapshot = "";
+let syncIsSaving = false;
 let dragPlaceholderHeight = 96;
 let activeDropZone = null;
 let activeBeforeId = "";
@@ -54,6 +81,7 @@ let appDatabase = null;
 let gitlabRefreshing = false;
 let gitlabTitleRequestId = 0;
 let lastManualTaskTitleValue = "";
+let taskDialogDraft = null;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -71,12 +99,15 @@ const els = {
   openDataFileBtn: document.querySelector("#openDataFileBtn"),
   saveDataFileBtn: document.querySelector("#saveDataFileBtn"),
   exportBtn: document.querySelector("#exportBtn"),
+  exportExcelBtn: document.querySelector("#exportExcelBtn"),
+  exportRcaCsvBtn: document.querySelector("#exportRcaCsvBtn"),
   importFile: document.querySelector("#importFile"),
   dailyReportBtn: document.querySelector("#dailyReportBtn"),
   historyBtn: document.querySelector("#historyBtn"),
   recoveryBtn: document.querySelector("#recoveryBtn"),
   shortcutHelpBtn: document.querySelector("#shortcutHelpBtn"),
   storageUsage: document.querySelector("#storageUsage"),
+  syncStatus: document.querySelector("#syncStatus"),
   dialog: document.querySelector("#taskDialog"),
   form: document.querySelector("#taskForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
@@ -95,8 +126,16 @@ const els = {
   taskLinkedIssueId: document.querySelector("#taskLinkedIssueId"),
   taskNextLabel: document.querySelector("#taskNextLabel"),
   taskNext: document.querySelector("#taskNext"),
+  taskLinkLabel: document.querySelector("#taskLinkLabel"),
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
+  qualityAnalysisSection: document.querySelector("#qualityAnalysisSection"),
+  qualityAnalysisStatus: document.querySelector("#qualityAnalysisStatus"),
+  qualityRouteType: document.querySelector("#qualityRouteType"),
+  qualityScope: document.querySelector("#qualityScope"),
+  qualityReproducibility: document.querySelector("#qualityReproducibility"),
+  qualityExternalDependency: document.querySelector("#qualityExternalDependency"),
+  qualityDiscoveryPhase: document.querySelector("#qualityDiscoveryPhase"),
   taskImages: document.querySelector("#taskImages"),
   taskAttachmentList: document.querySelector("#taskAttachmentList"),
   imagePreviewDialog: document.querySelector("#imagePreviewDialog"),
@@ -139,6 +178,7 @@ async function bootstrap() {
   suppressHistoryCapture = false;
   await initializeIndexedDb();
   updateStorageUsage();
+  updateSyncStatus("synced");
 }
 
 function bindEvents() {
@@ -157,11 +197,15 @@ function bindEvents() {
   els.addTaskBtn.addEventListener("click", () => openTaskDialog());
   els.openDataFileBtn.addEventListener("click", openDataFile);
   els.saveDataFileBtn.addEventListener("click", saveDataFile);
-  els.closeDialog.addEventListener("click", closeTaskDialog);
-  els.cancelDialog.addEventListener("click", closeTaskDialog);
+  els.closeDialog.addEventListener("click", () => { taskDialogDraft = null; closeTaskDialog(); });
+  els.cancelDialog.addEventListener("click", () => { taskDialogDraft = null; closeTaskDialog(); });
+  els.dialog.addEventListener("click", (event) => { if (event.target === els.dialog) saveDraftAndClose(); });
+  els.dialog.addEventListener("cancel", (event) => { event.preventDefault(); saveDraftAndClose(); });
   els.deleteTaskBtn.addEventListener("click", deleteCurrentTask);
   els.createTodoFromIssueBtn.addEventListener("click", createTodoFromCurrentIssue);
   els.exportBtn.addEventListener("click", exportData);
+  els.exportExcelBtn.addEventListener("click", exportIssuesToCsv);
+  els.exportRcaCsvBtn.addEventListener("click", exportIssueRcaCsv);
   els.importFile.addEventListener("change", importData);
   els.dailyReportBtn.addEventListener("click", openDailyReport);
   els.historyBtn.addEventListener("click", openHistoryDialog);
@@ -190,6 +234,7 @@ function bindEvents() {
     syncCompletedAtField();
     syncTaskNextLabel();
     syncRecurrenceField();
+    syncQualityAnalysisSection();
   });
   els.taskStatus.addEventListener("change", syncCompletedAtField);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
@@ -212,7 +257,17 @@ function fillStaticSelects() {
   els.taskType.innerHTML = `<option value="issue">Issue</option><option value="todo">Todo</option>`;
   els.taskPriority.innerHTML = priorities.map((priority) => `<option value="${priority}">${priority}</option>`).join("");
   els.taskRecurrence.innerHTML = `<option value="">なし</option><option value="daily">毎日</option>`;
+  fillSelect(els.qualityAnalysisStatus, qualityAnalysisStatusOptions, false);
+  fillSelect(els.qualityRouteType, qualityRouteTypes, true);
+  fillSelect(els.qualityScope, qualityScopes, true);
+  fillSelect(els.qualityReproducibility, qualityReproducibility, true);
+  fillSelect(els.qualityExternalDependency, qualityExternalDependencies, true);
+  fillSelect(els.qualityDiscoveryPhase, qualityDiscoveryPhases, true);
   fillStatusSelect("issue");
+}
+
+function fillSelect(select, options, includeBlank = false) {
+  select.innerHTML = `${includeBlank ? `<option value="">未設定</option>` : ""}${options.map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}`;
 }
 
 function fillStatusSelect(type, selected) {
@@ -255,13 +310,16 @@ async function openDataFile() {
       multiple: false
     });
     const file = await handle.getFile();
-    const imported = JSON.parse(await file.text());
+    const text = await file.text();
+    const imported = JSON.parse(text);
     validateImportedData(imported);
     dataFileHandle = handle;
+    syncFileSnapshot = text;
     markStateMutation("データファイルを読み込み");
     state = migrateState(imported);
     render();
-    alert("データファイルを開きました。変更後は「データファイルへ保存」を押してください。");
+    startSyncPolling();
+    showToast("共有ファイルを開きました。変更は自動保存されます。", false);
   } catch (error) {
     if (error.name !== "AbortError") {
       alert("読み込みに失敗しました。TaskManager の JSON データファイルを選択してください。");
@@ -286,15 +344,82 @@ async function saveDataFile() {
         }]
       });
     }
-    const writable = await dataFileHandle.createWritable();
-    await writable.write(JSON.stringify(state, null, 2));
-    await writable.close();
-    alert("データファイルへ保存しました。");
+    await writeDataFile(state);
+    startSyncPolling();
+    showToast("共有ファイルへ保存しました。", false);
   } catch (error) {
     if (error.name !== "AbortError") {
       alert("保存に失敗しました。右上のエクスポートでバックアップしてください。");
     }
   }
+}
+
+async function writeDataFile(dataState) {
+  if (!dataFileHandle) return;
+  const text = JSON.stringify(dataState, null, 2);
+  const writable = await dataFileHandle.createWritable();
+  await writable.write(text);
+  await writable.close();
+  syncFileSnapshot = text;
+  updateSyncStatus("saved");
+}
+
+function startSyncPolling() {
+  clearInterval(syncPollingTimer);
+  updateSyncStatus("synced");
+  syncPollingTimer = setInterval(pollDataFile, 30000);
+}
+
+function stopSyncPolling() {
+  clearInterval(syncPollingTimer);
+  syncPollingTimer = null;
+  updateSyncStatus("off");
+}
+
+async function pollDataFile() {
+  if (!dataFileHandle || syncIsSaving) return;
+  try {
+    updateSyncStatus("checking");
+    const file = await dataFileHandle.getFile();
+    const text = await file.text();
+    if (text === syncFileSnapshot) {
+      updateSyncStatus("synced");
+      return;
+    }
+    const imported = JSON.parse(text);
+    validateImportedData(imported);
+    syncFileSnapshot = text;
+    suppressHistoryCapture = true;
+    state = migrateState(imported);
+    lastStateSnapshot = serializeState(state);
+    lastPersistedSnapshot = lastStateSnapshot;
+    suppressHistoryCapture = false;
+    render();
+    updateSyncStatus("synced");
+    showToast("他のユーザーの変更を同期しました。", false);
+  } catch {
+    updateSyncStatus("error");
+  }
+}
+
+function updateSyncStatus(status) {
+  if (!els.syncStatus) return;
+  const titles = {
+    off: "",
+    synced: "同期済み",
+    checking: "確認中...",
+    saved: "保存完了",
+    error: "同期エラー"
+  };
+  const classMap = {
+    off: "",
+    synced: "sync-ok",
+    checking: "sync-checking",
+    saved: "sync-ok",
+    error: "sync-error"
+  };
+  els.syncStatus.title = titles[status] || "";
+  els.syncStatus.className = `sync-status ${classMap[status] || ""}`;
 }
 
 function renderFilterOptions() {
@@ -309,6 +434,16 @@ function ownerCandidates() {
     .filter((owner) => owner && !teamMemberSet.has(owner))
   )].sort((a, b) => a.localeCompare(b, "ja-JP"));
   return [...teamMembers, ...externalOwners];
+}
+
+function selfMemberName() {
+  const configured = normalizeName(state.selfMember);
+  if (configured && state.members.includes(configured)) return configured;
+  return state.members.includes(selfMemberDefault) ? selfMemberDefault : state.members[0] || selfMemberDefault;
+}
+
+function isSelfSearchValue(value) {
+  return ["自分", "本人", "me", "myself"].includes(String(value || "").trim().toLowerCase());
 }
 
 function renderProjectList() {
@@ -366,11 +501,13 @@ function renderDashboard() {
     ? selectedStat.tasks.sort(selectedStat.key === "done" ? sortByCompletedAt : sortByUrgency)
     : null;
   const recentDone = visible.filter(isDone).sort(sortByCompletedAt).slice(0, 8);
+  const qualitySummary = qualityAnalysisSummary(issues);
 
   els.dashboardView.innerHTML = `
     <div class="stats-grid">
       ${statItems.map((item) => stat(item.label, item.tasks.length, item.key)).join("")}
     </div>
+    ${qualitySummary}
     ${selectedStat
       ? compactTaskSection(`${selectedStat.label} の結果`, selectedTasks)
       : `
@@ -380,6 +517,7 @@ function renderDashboard() {
   `;
   wireDashboardStats();
   wireDashboardSectionFilters();
+  wireQualityAnalysisFilters();
   wireTaskButtons(els.dashboardView);
 }
 
@@ -389,14 +527,14 @@ function renderBoard() {
   els.boardView.innerHTML = `
     <div class="board">
       ${state.workflow.map((status) => {
-        const tasks = visible.filter((task) => task.status === status).sort(sortByBoardOrder);
-        return `
+    const tasks = visible.filter((task) => task.status === status).sort(sortByBoardOrder);
+    return `
           <div class="column" data-status="${escapeHtml(status)}">
             <div class="column-title"><span>${escapeHtml(status)}</span><span class="tag">${tasks.length}</span></div>
             <div class="cards" data-drop-status="${escapeHtml(status)}">${tasks.length ? tasks.map((task) => taskCard(task, true)).join("") : emptyState("Issue はありません")}</div>
           </div>
         `;
-      }).join("")}
+  }).join("")}
     </div>
   `;
   wireTaskButtons(els.boardView);
@@ -472,13 +610,13 @@ async function refreshGitLabIssueStatuses() {
 
   gitlabRefreshing = true;
   renderWorkflowTopControl();
-  showToast(`GitLab 状態を更新中... (${issueTasks.length}件)`, false);
+  showToast(`GitLab 状態を更新中... 0/${issueTasks.length} 件成功`, false, { sticky: true });
   let successCount = 0;
   const errors = [];
   const checkedAt = new Date().toISOString();
 
   try {
-    for (const task of issueTasks) {
+    for (const [index, task] of issueTasks.entries()) {
       const result = await fetchGitLabIssueStatusWithSavedToken(task.link, checkedAt);
       const gitlab = { ...result, seenUpdatedAt: normalizeGitLabStatus(task.gitlab)?.seenUpdatedAt || "" };
       if (!result.error) {
@@ -487,6 +625,7 @@ async function refreshGitLabIssueStatuses() {
         errors.push(result.error);
       }
       state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab, updatedAt: new Date().toISOString() } : item);
+      showToast(`GitLab 状態を更新中... ${successCount}/${issueTasks.length} 件成功（${index + 1}/${issueTasks.length} 完了）`, false, { sticky: true });
     }
     lastStateSnapshot = serializeState(state);
     pendingMutationLabel = "";
@@ -585,7 +724,7 @@ function isGitLabClosed(task) {
 }
 
 function issueBadges(task, className) {
-  const references = issueReferences(task.link);
+  const references = taskIssueReferences(task);
   if (!references.length) return "";
   const updateDot = gitlabUpdateDot(task);
   return references.map((reference, index) => {
@@ -594,6 +733,10 @@ function issueBadges(task, className) {
       ? `<a class="${className}" href="${escapeHtml(reference.url)}" target="_blank" rel="noopener noreferrer" data-issue-link-task="${task.id}">${escapeHtml(reference.label)}${dot}</a>`
       : `<span class="${className} issue-number-static">${escapeHtml(reference.label)}${dot}</span>`;
   }).join("");
+}
+
+function taskIssueReferences(task) {
+  return issueReferences(task.link);
 }
 
 function issueReferences(value) {
@@ -609,6 +752,68 @@ function issueReferences(value) {
       };
     })
     .filter(Boolean);
+}
+
+function issueReferenceFromRelatedIssue(item) {
+  const value = String(item?.value || "").trim();
+  const number = extractIssueNumber(value);
+  if (!number) return null;
+  const url = isBareIssueNumber(value) ? "" : normalizeUrl(value);
+  return {
+    url,
+    number,
+    label: issueLabel(value),
+    type: relatedIssueTypes.includes(item.type) ? item.type : "関連Issue",
+    note: String(item.note || "").trim()
+  };
+}
+
+function emptyRelatedIssue() {
+  return { value: "", type: "関連Issue", note: "" };
+}
+
+function normalizeRelatedIssues(value, fallbackLink = "") {
+  const rows = Array.isArray(value) ? value : [];
+  const normalized = rows
+    .map((item) => ({
+      value: normalizeTaskLinkInput(item?.value || item?.url || item?.link || "", "issue"),
+      type: relatedIssueTypes.includes(item?.type) ? item.type : "関連Issue",
+      note: String(item?.note || "").trim()
+    }))
+    .filter((item) => extractIssueNumber(item.value));
+  if (!normalized.length && fallbackLink && extractIssueNumber(fallbackLink)) {
+    splitIssueValues(fallbackLink).forEach((entry, index) => {
+      const value = normalizeTaskLinkInput(entry, "issue");
+      if (extractIssueNumber(value)) normalized.push({ value, type: index === 0 ? "主Issue" : "関連Issue", note: "" });
+    });
+  }
+  if (normalized.length && !normalized.some((item) => item.type === "主Issue")) normalized[0].type = "主Issue";
+  return normalized;
+}
+
+function demoQualityMigration(title) {
+  if (String(title || "").includes("A 機能異常後")) {
+    return {
+      relatedIssues: [],
+      quality: {
+        analysisStatus: "未確認"
+      }
+    };
+  }
+  if (String(title || "").includes("カメラ")) {
+    return {
+      relatedIssues: [],
+      quality: {
+        analysisStatus: "記載完了"
+      }
+    };
+  }
+  return null;
+}
+
+function primaryIssueLink(relatedIssues, fallbackLink = "") {
+  const normalized = normalizeRelatedIssues(relatedIssues, fallbackLink);
+  return normalized.find((item) => item.type === "主Issue")?.value || normalized[0]?.value || normalizeTaskLinkInput(fallbackLink, "issue");
 }
 
 function splitIssueValues(value) {
@@ -738,6 +943,7 @@ function renderProjects() {
 
 function renderPeople() {
   const memberSet = new Set(state.members.map(normalizeName));
+  const selfMember = selfMemberName();
   const rows = state.members.map((member) => {
     const tasks = state.tasks.filter((task) => task.owner === member);
     const open = tasks.filter((task) => !isDone(task));
@@ -746,7 +952,7 @@ function renderPeople() {
     const todos = open.filter((task) => task.type === "todo");
     return `
       <tr>
-        <td><button class="table-link" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button></td>
+        <td><button class="table-link" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button>${member === selfMember ? `<span class="self-member-badge">自分</span>` : ""}</td>
         <td>${open.length}</td>
         <td>${issues.length}</td>
         <td>${todos.length}</td>
@@ -792,9 +998,11 @@ function renderPeople() {
 
   const memberRows = state.members.map((member, index) => {
     const assigned = state.tasks.filter((task) => task.owner === member).length;
+    const isSelf = member === selfMember;
     return `
-      <div class="member-row">
+      <div class="member-row${isSelf ? " is-self" : ""}">
         <input value="${escapeHtml(member)}" data-member-name="${index}" aria-label="メンバー名">
+        <button class="self-member-button${isSelf ? " active" : ""}" data-self-member="${index}" type="button">${isSelf ? "自分" : "自分にする"}</button>
         <span class="tag">${assigned} 件</span>
         <button class="tiny-button" data-save-member="${index}" type="button">保存</button>
         <button class="tiny-button" data-delete-member="${index}" type="button" ${assigned ? "disabled" : ""}>削除</button>
@@ -865,7 +1073,7 @@ function openDailyReport() {
 function reportTaskLines(tasks, emptyMessage) {
   return tasks.length
     ? tasks.map((task) => {
-      const prefix = issueReferences(task.link).map((reference) => reference.label).join(" ");
+      const prefix = taskIssueReferences(task).map((reference) => reference.label).join(" ");
       const stateText = isDone(task) ? "" : ` (${task.status} / ${task.owner})`;
       return `・${prefix ? `${prefix} ` : ""}${task.title}: ${task.next}${stateText}`;
     })
@@ -1148,11 +1356,14 @@ function taskCard(task, enableDrag = false) {
 function projectQuickControl(task) {
   const projects = [...new Set([...state.tasks.map((item) => item.project), task.project].filter(Boolean))].sort();
   const menu = projectPickerTaskId === task.id
-    ? `<div class="quick-menu project-menu" role="menu">
-        <input class="quick-menu-input" value="${escapeHtml(task.project)}" data-project-input="${task.id}" list="projectList" maxlength="40" aria-label="案件を変更">
+    ? `<div class="owner-menu project-menu" role="menu">
         ${projects.map((project) => `
-          <button class="quick-choice${project === task.project ? " active" : ""}" data-project-choice="${escapeHtml(project)}" data-project-task="${task.id}" type="button" role="menuitem">${escapeHtml(project)}</button>
+          <button class="owner-choice${project === task.project ? " active" : ""}" data-project-choice="${escapeHtml(project)}" data-project-task="${task.id}" type="button" role="menuitem">${escapeHtml(project)}</button>
         `).join("")}
+        <div class="owner-custom-row">
+          <input class="quick-menu-input" value="${escapeHtml(task.project)}" data-project-input="${task.id}" list="projectList" maxlength="40" placeholder="案件名">
+          <button class="tiny-button" data-project-save="${task.id}" type="button">保存</button>
+        </div>
       </div>`
     : "";
   return `<span class="quick-field-wrap project-quick-wrap"><button class="project-name" data-project-picker="${task.id}" data-project-filter="${escapeHtml(task.project)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.project)}</button>${menu}</span>`;
@@ -1365,7 +1576,14 @@ function wireTaskButtons(root) {
         saveQuickProject(input.dataset.projectInput, input.value);
       }
     });
-    input.addEventListener("change", () => saveQuickProject(input.dataset.projectInput, input.value));
+  });
+  root.querySelectorAll("[data-project-save]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const input = root.querySelector(`[data-project-input="${CSS.escape(button.dataset.projectSave)}"]`);
+      saveQuickProject(button.dataset.projectSave, input?.value || "");
+    });
   });
   root.querySelectorAll("[data-project-choice]").forEach((button) => {
     button.addEventListener("click", (event) => {
@@ -1837,6 +2055,10 @@ function wireMemberButtons() {
     button.addEventListener("click", () => deleteMember(Number(button.dataset.deleteMember)));
   });
 
+  els.peopleView.querySelectorAll("[data-self-member]").forEach((button) => {
+    button.addEventListener("click", () => setSelfMember(Number(button.dataset.selfMember)));
+  });
+
   els.peopleView.querySelectorAll("[data-filter-member]").forEach((button) => {
     button.addEventListener("click", () => filterTasksByMember(button.dataset.filterMember));
   });
@@ -1957,6 +2179,7 @@ function addMember(rawName) {
 function renameMember(index, rawName) {
   const oldName = state.members[index];
   const newName = normalizeName(rawName);
+  const wasSelf = oldName === selfMemberName();
   if (!oldName || !newName) {
     alert("メンバー名は空にできません。");
     renderPeople();
@@ -1969,11 +2192,21 @@ function renameMember(index, rawName) {
     markStateMutation(`担当者を「${newName}」へ統合`);
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
     state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
+    if (wasSelf) state.selfMember = newName;
   } else {
     markStateMutation(`メンバーを「${newName}」へ変更`);
     state.members[index] = newName;
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
+    if (wasSelf) state.selfMember = newName;
   }
+  render();
+}
+
+function setSelfMember(index) {
+  const member = state.members[index];
+  if (!member || member === selfMemberName()) return;
+  markStateMutation(`自分を「${member}」に設定`);
+  state.selfMember = member;
   render();
 }
 
@@ -1987,11 +2220,13 @@ function deleteMember(index) {
   }
   markStateMutation(`メンバー「${member}」を削除`);
   state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
+  if (state.selfMember === member) state.selfMember = selfMemberName();
   render();
 }
 
 function filterTasksByMember(member, targetView = "dashboard") {
-  filterTasksBySearch(`担当:"${member}"`, targetView);
+  const targetMember = isSelfSearchValue(member) ? selfMemberName() : member;
+  filterTasksBySearch(`担当:"${targetMember}"`, targetView);
 }
 
 function filterTasksByProject(project, targetView = "dashboard") {
@@ -2018,6 +2253,49 @@ function stat(label, value, key) {
   return `<button class="stat${activeClass}" data-stat-filter="${key}" type="button"><span>${label}</span><strong>${value}</strong></button>`;
 }
 
+function qualityAnalysisSummary(issues) {
+  const issuesWithQuality = issues.filter((task) => task.quality);
+  if (!issues.length) return "";
+  const unchecked = issuesWithQuality.filter((task) => normalizeIssueQuality(task.quality).analysisStatus === "未確認");
+  const completed = issuesWithQuality.filter((task) => normalizeIssueQuality(task.quality).analysisStatus === "記載完了");
+  return `
+    <section class="quality-summary">
+      <div class="section-title compact-section-title">
+        <h3>品質分析</h3>
+        <span class="tag">${issues.length}</span>
+      </div>
+      <div class="quality-alert-grid">
+        <button class="quality-alert" type="button" data-quality-status="未確認">
+          <span>原因・対策分析 未確認</span>
+          <strong>${unchecked.length}</strong>
+        </button>
+      </div>
+      <div class="quality-summary-grid">
+        ${qualityMetricPanel("発見フェーズ", issuesWithQuality, "discoveryPhase", "発見フェーズ")}
+        ${qualityMetricPanel("外部依存", issuesWithQuality, "externalDependency", "外部依存")}
+      </div>
+    </section>
+  `;
+}
+
+function qualityMetricPanel(title, tasks, field, searchKey) {
+  const groups = Object.entries(groupBy(tasks.filter((task) => task.quality?.[field]), (task) => task.quality[field]))
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "ja-JP"));
+  return `
+    <div class="quality-panel">
+      <h4>${escapeHtml(title)}</h4>
+      <div class="quality-metric-list">
+        ${groups.length ? groups.map(([label, groupTasks]) => `
+          <button class="quality-metric" type="button" data-quality-key="${escapeHtml(searchKey)}" data-quality-value="${escapeHtml(label)}">
+            <span>${escapeHtml(label)}</span>
+            <strong>${groupTasks.length}</strong>
+          </button>
+        `).join("") : `<div class="quality-empty">未設定</div>`}
+      </div>
+    </div>
+  `;
+}
+
 function wireDashboardStats() {
   els.dashboardView.querySelectorAll("[data-stat-filter]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2032,6 +2310,19 @@ function wireDashboardSectionFilters() {
     button.addEventListener("click", () => {
       dashboardStatFilter = button.dataset.sectionFilter;
       renderDashboard();
+    });
+  });
+}
+
+function wireQualityAnalysisFilters() {
+  els.dashboardView.querySelectorAll("[data-quality-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      filterTasksBySearch(`種別:Issue ${button.dataset.qualityKey}:"${button.dataset.qualityValue}"`, "board");
+    });
+  });
+  els.dashboardView.querySelectorAll("[data-quality-status]").forEach((button) => {
+    button.addEventListener("click", () => {
+      filterTasksBySearch(`種別:Issue 原因・対策分析:"${button.dataset.qualityStatus}"`, "board");
     });
   });
 }
@@ -2084,6 +2375,7 @@ function openTaskDialog(id, overrides = {}) {
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
+  fillQualityForm(type === "issue" ? normalizeIssueQuality(overrides.quality || task?.quality) : defaultIssueQuality());
   currentTaskAttachments = normalizeAttachments(overrides.attachments || task?.attachments || []);
   els.taskImages.value = "";
   renderTaskAttachments();
@@ -2091,7 +2383,35 @@ function openTaskDialog(id, overrides = {}) {
   syncCompletedAtField();
   syncTaskNextLabel();
   syncRecurrenceField();
+  syncQualityAnalysisSection();
   els.dialog.showModal();
+  autoResizeTaskNext();
+  if (taskDialogDraft && taskDialogDraft.id === (task?.id || "")) {
+    restoreTaskDialogDraft();
+  }
+}
+
+function restoreTaskDialogDraft() {
+  if (!taskDialogDraft) return;
+  const d = taskDialogDraft;
+  taskDialogDraft = null;
+  els.taskTitle.value = d.title;
+  els.taskProject.value = d.project;
+  els.taskOwner.value = d.owner;
+  els.taskDue.value = d.due;
+  if (els.taskStatus.querySelector(`option[value="${CSS.escape(d.status)}"]`)) els.taskStatus.value = d.status;
+  els.taskPriority.value = d.priority;
+  els.taskRecurrence.value = d.recurrence;
+  els.taskNext.value = d.next;
+  els.taskNotes.value = d.notes;
+  els.qualityAnalysisStatus.value = d.qualityAnalysisStatus;
+  els.qualityRouteType.value = d.qualityRouteType;
+  els.qualityScope.value = d.qualityScope;
+  els.qualityReproducibility.value = d.qualityReproducibility;
+  els.qualityExternalDependency.value = d.qualityExternalDependency;
+  els.qualityDiscoveryPhase.value = d.qualityDiscoveryPhase;
+  currentTaskAttachments = [...d.attachments];
+  renderTaskAttachments();
   autoResizeTaskNext();
 }
 
@@ -2123,6 +2443,66 @@ function syncRecurrenceField() {
   const isTodo = els.taskType.value === "todo";
   els.taskRecurrenceLabel.hidden = !isTodo;
   if (!isTodo) els.taskRecurrence.value = "";
+}
+
+function syncQualityAnalysisSection() {
+  const isIssue = els.taskType.value === "issue";
+  els.qualityAnalysisSection.hidden = !isIssue;
+  els.taskLinkLabel.hidden = true;
+}
+
+function defaultIssueQuality() {
+  return {
+    analysisStatus: "未確認",
+    routeType: "",
+    scope: "",
+    reproducibility: "",
+    externalDependency: "",
+    discoveryPhase: ""
+  };
+}
+
+function normalizeIssueQuality(quality = {}) {
+  const defaults = defaultIssueQuality();
+  const legacyStatuses = [
+    quality.directCauseStatus,
+    quality.rootCauseStatus,
+    quality.leakCauseStatus,
+    quality.horizontalStatus
+  ].filter(Boolean);
+  const legacyComplete = legacyStatuses.length > 0 && legacyStatuses.every((status) => status === "GitHub記載済み");
+  const analysisStatus = qualityAnalysisStatusOptions.includes(quality.analysisStatus)
+    ? quality.analysisStatus
+    : legacyComplete || quality.preventionCheck === "確認済み" || quality.effectCheck === "確認済み" ? "記載完了" : defaults.analysisStatus;
+  return {
+    analysisStatus,
+    routeType: qualityRouteTypes.includes(quality.routeType) ? quality.routeType : defaults.routeType,
+    scope: qualityScopes.includes(quality.scope) ? quality.scope : defaults.scope,
+    reproducibility: qualityReproducibility.includes(quality.reproducibility) ? quality.reproducibility : defaults.reproducibility,
+    externalDependency: qualityExternalDependencies.includes(quality.externalDependency) ? quality.externalDependency : defaults.externalDependency,
+    discoveryPhase: qualityDiscoveryPhases.includes(quality.discoveryPhase) ? quality.discoveryPhase : defaults.discoveryPhase
+  };
+}
+
+function fillQualityForm(quality) {
+  const normalized = normalizeIssueQuality(quality);
+  els.qualityAnalysisStatus.value = normalized.analysisStatus;
+  els.qualityRouteType.value = normalized.routeType;
+  els.qualityScope.value = normalized.scope;
+  els.qualityReproducibility.value = normalized.reproducibility;
+  els.qualityExternalDependency.value = normalized.externalDependency;
+  els.qualityDiscoveryPhase.value = normalized.discoveryPhase;
+}
+
+function readQualityForm() {
+  return normalizeIssueQuality({
+    analysisStatus: els.qualityAnalysisStatus.value,
+    routeType: els.qualityRouteType.value,
+    scope: els.qualityScope.value,
+    reproducibility: els.qualityReproducibility.value,
+    externalDependency: els.qualityExternalDependency.value,
+    discoveryPhase: els.qualityDiscoveryPhase.value
+  });
 }
 
 function handleTaskLinkInput() {
@@ -2339,6 +2719,7 @@ function openTodoDialogFromIssue(issue) {
     priority: issue.priority,
     next: "この Issue を調査する。",
     link: issue.link,
+    relatedIssues: normalizeRelatedIssues(issue.relatedIssues, issue.link),
     linkedIssueId: issue.id,
     notes: `関連 Issue: ${issue.title}`
   });
@@ -2348,6 +2729,29 @@ function closeTaskDialog() {
   els.dialog.close();
 }
 
+function saveDraftAndClose() {
+  taskDialogDraft = {
+    id: els.taskId.value,
+    title: els.taskTitle.value,
+    project: els.taskProject.value,
+    owner: els.taskOwner.value,
+    due: els.taskDue.value,
+    status: els.taskStatus.value,
+    priority: els.taskPriority.value,
+    recurrence: els.taskRecurrence.value,
+    next: els.taskNext.value,
+    notes: els.taskNotes.value,
+    qualityAnalysisStatus: els.qualityAnalysisStatus.value,
+    qualityRouteType: els.qualityRouteType.value,
+    qualityScope: els.qualityScope.value,
+    qualityReproducibility: els.qualityReproducibility.value,
+    qualityExternalDependency: els.qualityExternalDependency.value,
+    qualityDiscoveryPhase: els.qualityDiscoveryPhase.value,
+    attachments: [...currentTaskAttachments]
+  };
+  closeTaskDialog();
+}
+
 function saveTask(event) {
   event.preventDefault();
   els.taskLink.setCustomValidity("");
@@ -2355,7 +2759,10 @@ function saveTask(event) {
   const type = els.taskType.value;
   const existingTask = state.tasks.find((item) => item.id === id);
   const previousRecurrenceKey = existingTask?.recurrence === "daily" ? existingTask.recurrenceKey : "";
-  const link = normalizeTaskLinkInput(els.taskLink.value, type);
+  const relatedIssues = normalizeRelatedIssues(existingTask?.relatedIssues, existingTask?.link || "");
+  const link = type === "issue"
+    ? existingTask?.link || ""
+    : existingTask?.link || normalizeTaskLinkInput(els.taskLink.value, type);
   const status = els.taskStatus.value;
   const doneStatus = type === "todo" ? todoDoneStatus : completedStatus;
   const completedAt = status === doneStatus
@@ -2364,18 +2771,7 @@ function saveTask(event) {
   const recurrence = type === "todo" ? els.taskRecurrence.value : "";
   const order = Number.isFinite(existingTask?.order) ? existingTask.order : defaultOrderForNewTask(type);
   const title = taskTitleValueForSave(type, existingTask);
-
-  if (type === "issue" && !extractIssueNumber(link)) {
-    els.taskLink.setCustomValidity("Issue URL には Issue 番号を含めてください。");
-    els.taskLink.reportValidity();
-    return;
-  }
-
-  if (type === "issue" && link && hasDuplicateIssueLink(id, link)) {
-    els.taskLink.setCustomValidity("同じ Issue URL はすでに存在します。");
-    els.taskLink.reportValidity();
-    return;
-  }
+  const quality = type === "issue" ? readQualityForm() : null;
 
   const task = {
     id,
@@ -2393,6 +2789,8 @@ function saveTask(event) {
     next: els.taskNext.value.trim(),
     link,
     gitlab: type === "issue" && existingTask?.link === link ? normalizeGitLabStatus(existingTask.gitlab) : null,
+    relatedIssues,
+    quality,
     order,
     notes: els.taskNotes.value.trim(),
     attachments: normalizeAttachments(currentTaskAttachments),
@@ -2415,6 +2813,7 @@ function saveTask(event) {
       : item);
   }
 
+  taskDialogDraft = null;
   closeTaskDialog();
   render();
 }
@@ -2495,7 +2894,7 @@ function clearPendingConfirmations() {
 function syncIssueLinkRequirement() {
   const isIssue = els.taskType.value === "issue";
   els.taskLink.setCustomValidity("");
-  els.taskLink.required = isIssue;
+  els.taskLink.required = false;
   els.taskLink.placeholder = isIssue
     ? "https://example.com/issues/123"
     : "任意: Issue URL / Issue 番号を複数入力できます（改行・カンマ区切り）";
@@ -2524,6 +2923,7 @@ function deleteCurrentTask() {
   const task = state.tasks.find((item) => item.id === id);
   markStateMutation(`「${task?.title || "項目"}」を削除`);
   state.tasks = state.tasks.filter((task) => task.id !== id);
+  taskDialogDraft = null;
   closeTaskDialog();
   render();
 }
@@ -2573,6 +2973,12 @@ function parseSearchQuery(query) {
     "状態": "status", "ステータス": "status", status: "status",
     "優先": "priority", "優先度": "priority", priority: "priority",
     "次": "next", "次のアクション": "next", next: "next",
+    "経路": "qualityRouteType", "経路タイプ": "qualityRouteType",
+    "関連範囲": "qualityScope",
+    "再現性": "qualityReproducibility",
+    "外部依存": "qualityExternalDependency",
+    "発見": "qualityDiscoveryPhase", "発見フェーズ": "qualityDiscoveryPhase",
+    "原因": "qualityAnalysisStatus", "原因・対策分析": "qualityAnalysisStatus", "品質": "qualityAnalysisStatus",
     "完了": "done", done: "done"
   };
   return (String(query || "").match(/(?:[^\s\"]+|\"[^\"]*\")+/g) || []).map((rawToken) => {
@@ -2591,11 +2997,15 @@ function parseSearchQuery(query) {
 function matchesSearchCriterion(task, criterion) {
   const value = criterion.value;
   if (criterion.key === "text") return searchableTaskText(task).includes(value);
-  if (criterion.key === "owner") return task.owner.toLowerCase().includes(value);
+  if (criterion.key === "owner") {
+    const ownerValue = isSelfSearchValue(value) ? selfMemberName().toLowerCase() : value;
+    return task.owner.toLowerCase().includes(ownerValue);
+  }
   if (criterion.key === "project") return task.project.toLowerCase().includes(value);
   if (criterion.key === "type") return taskLabel(task).toLowerCase() === value || task.type === value;
   if (criterion.key === "priority") return task.priority.toLowerCase() === value.replace(/優先度|優先/g, "");
   if (criterion.key === "next") return task.next.toLowerCase().includes(value);
+  if (criterion.key.startsWith("quality")) return matchesQualitySearch(task, criterion.key, value);
   if (criterion.key === "done") {
     const wantsDone = ["true", "yes", "1", "済", "完了"].includes(value);
     const wantsOpen = ["false", "no", "0", "未完了"].includes(value);
@@ -2607,6 +3017,13 @@ function matchesSearchCriterion(task, criterion) {
   }
   if (criterion.key === "due") return matchesDueSearch(task, value);
   return true;
+}
+
+function matchesQualitySearch(task, key, value) {
+  if (task.type !== "issue") return false;
+  const field = key.replace(/^quality/, "");
+  const normalizedField = `${field.charAt(0).toLowerCase()}${field.slice(1)}`;
+  return String(task.quality?.[normalizedField] || "").toLowerCase().includes(value);
 }
 
 function matchesDueSearch(task, value) {
@@ -2694,7 +3111,11 @@ function emptyState(defaultMessage) {
 }
 
 function searchableTaskText(task) {
-  const issueNumbers = issueReferences(task.link).map((reference) => reference.number);
+  const issueNumbers = taskIssueReferences(task).map((reference) => reference.number);
+  const relatedIssueText = Array.isArray(task.relatedIssues)
+    ? task.relatedIssues.flatMap((item) => [item.value, item.type, item.note])
+    : [];
+  const qualityValues = task.type === "issue" && task.quality ? Object.values(task.quality) : [];
   return [
     task.type,
     task.title,
@@ -2704,6 +3125,8 @@ function searchableTaskText(task) {
     task.priority,
     task.next,
     task.notes,
+    ...relatedIssueText,
+    ...qualityValues,
     ...(Array.isArray(task.attachments) ? task.attachments.map((attachment) => attachment.name).filter(Boolean) : []),
     task.link,
     ...issueNumbers,
@@ -2714,6 +3137,7 @@ function searchableTaskText(task) {
 
 function syncMembersFromTasks() {
   state.members = [...new Set(state.members.map(normalizeName).filter(Boolean))];
+  state.selfMember = selfMemberName();
 }
 
 function normalizeName(value) {
@@ -2728,6 +3152,154 @@ function exportData() {
   link.download = `task-manager-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function csvCell(value) {
+  const str = String(value ?? "");
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename, headers, rows) {
+  const csv = "\uFEFF" + [headers.map(csvCell).join(","), ...rows].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportIssuesToCsv() {
+  const headers = [
+    "No.", "タイトル", "案件", "担当者", "期限", "ステータス", "優先度",
+    "経路タイプ", "関連範囲", "再現性", "外部依存", "発見フェーズ", "原因・対策分析",
+    "次のアクション／詳細", "メモ", "Issue", "作成日", "更新日"
+  ];
+
+  const issues = state.tasks
+    .filter((task) => task.type === "issue")
+    .sort(sortByUrgency);
+
+  // Issue列: URL付きなら =HYPERLINK("url","外結745") 形式のExcel数式
+  const issueLinkCell = (task) => {
+    const refs = taskIssueReferences(task);
+    if (!refs.length) return `""`;
+    const primary = refs.find((r) => r.url) || refs[0];
+    const displayText = primary.label.replace(/\s*#/, "");
+    if (primary.url) {
+      const safeUrl = primary.url.replace(/"/g, '""');
+      const safeText = displayText.replace(/"/g, '""');
+      return `=HYPERLINK("${safeUrl}","${safeText}")`;
+    }
+    return csvCell(displayText);
+  };
+
+  const rows = issues.map((task, index) => {
+    const q = task.quality ? normalizeIssueQuality(task.quality) : defaultIssueQuality();
+    return [
+      csvCell(index + 1),
+      csvCell(task.title),
+      csvCell(task.project),
+      csvCell(task.owner),
+      csvCell(task.due),
+      csvCell(task.status),
+      csvCell(task.priority),
+      csvCell(q.routeType),
+      csvCell(q.scope),
+      csvCell(q.reproducibility),
+      csvCell(q.externalDependency),
+      csvCell(q.discoveryPhase),
+      csvCell(q.analysisStatus),
+      csvCell(task.next),
+      csvCell(task.notes),
+      issueLinkCell(task),
+      csvCell((task.createdAt || "").slice(0, 10)),
+      csvCell((task.updatedAt || "").slice(0, 10))
+    ].join(",");
+  });
+
+  downloadCsv(`issues-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  showToast(`Issue ${issues.length} 件を CSV でエクスポートしました。`, false);
+}
+
+function exportIssueRcaCsv() {
+  const headers = [
+    "Issue ID",
+    "発生日",
+    "所属業務",
+    "対象機能",
+    "事象／発生条件",
+    "重要度",
+    "対応Status",
+    "直接原因",
+    "Root Cause分類",
+    "Root Cause",
+    "流出原因",
+    "抽出テスト観点",
+    "観点ID",
+    "横展開対象／判断理由",
+    "横展開結果",
+    "Matrix更新",
+    "追加資産",
+    "証跡URL／Case ID",
+    "担当",
+    "期限",
+    "Close判定"
+  ];
+  const issues = state.tasks
+    .filter((task) => task.type === "issue")
+    .sort(sortByUrgency);
+  const rows = issues.map((task, index) => {
+    const q = task.quality ? normalizeIssueQuality(task.quality) : defaultIssueQuality();
+    const refs = taskIssueReferences(task);
+    const primaryRef = refs.find((ref) => ref.url) || refs[0];
+    const issueCell = rcaIssueIdCell(primaryRef);
+    const evidenceUrl = primaryRef?.url || normalizeTaskLinkInput(task.link, "issue");
+    const viewpointHint = [
+      q.routeType && `経路:${q.routeType}`,
+      q.scope && `範囲:${q.scope}`,
+      q.reproducibility && `再現性:${q.reproducibility}`,
+      q.externalDependency && `外部依存:${q.externalDependency}`,
+      q.discoveryPhase && `発見:${q.discoveryPhase}`,
+      q.analysisStatus && `原因・対策分析:${q.analysisStatus}`
+    ].filter(Boolean).join(" / ");
+    const rowNumber = index + 2;
+    return [
+      issueCell,
+      csvCell((task.createdAt || task.updatedAt || "").slice(0, 10)),
+      csvCell(task.project),
+      csvCell(task.title),
+      csvCell(task.next || task.notes || task.title),
+      csvCell(task.priority),
+      csvCell(task.status),
+      csvCell(""),
+      csvCell(""),
+      csvCell(""),
+      csvCell(""),
+      csvCell(viewpointHint),
+      csvCell(""),
+      csvCell(""),
+      csvCell(""),
+      csvCell("未更新"),
+      csvCell(""),
+      csvCell(evidenceUrl),
+      csvCell(task.owner),
+      csvCell(task.due),
+      csvCell(`=IF(A${rowNumber}="","",IF(AND(G${rowNumber}="完了",J${rowNumber}<>"",K${rowNumber}<>"",N${rowNumber}<>"",P${rowNumber}<>"未更新"),"Close可","要確認"))`)
+    ].join(",");
+  });
+  downloadCsv(`issue-rca-management-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  showToast(`Issue_RCA管理 用CSVを ${issues.length} 件出力しました。`, false);
+}
+
+function rcaIssueIdCell(reference) {
+  if (!reference) return csvCell("");
+  const displayText = reference.label.replace(/\s*#/, "");
+  if (!reference.url) return csvCell(displayText);
+  const safeUrl = reference.url.replace(/"/g, '""');
+  const safeText = displayText.replace(/"/g, '""');
+  return csvCell(`=HYPERLINK("${safeUrl}","${safeText}")`);
 }
 
 function importData(event) {
@@ -2803,11 +3375,15 @@ function undoLastChange() {
   showToast(`${entry.label}を取り消しました。`, false);
 }
 
-function showToast(message, canUndo = true) {
+function showToast(message, canUndo = true, options = {}) {
   clearTimeout(toastTimer);
   els.toastMessage.textContent = message;
   els.undoBtn.hidden = !canUndo || !undoStack.length;
   els.toast.hidden = false;
+  if (options.sticky) {
+    toastTimer = null;
+    return;
+  }
   toastTimer = setTimeout(() => { els.toast.hidden = true; }, 5200);
 }
 
@@ -2984,6 +3560,15 @@ function saveState() {
   if (snapshot === lastPersistedSnapshot) return;
   lastPersistedSnapshot = snapshot;
   persistStateToIndexedDb().then(updateStorageUsage).catch(() => { lastPersistedSnapshot = ""; });
+  // 共有ファイルが開かれていれば自動書き込み（ポーリング中の上書き防止）
+  if (dataFileHandle && !syncIsSaving) {
+    syncIsSaving = true;
+    updateSyncStatus("checking");
+    writeDataFile(state).catch(() => updateSyncStatus("error")).finally(() => { syncIsSaving = false; });
+  } else {
+    updateSyncStatus("checking");
+    persistStateToIndexedDb().then(() => updateSyncStatus("synced")).catch(() => updateSyncStatus("error"));
+  }
   try {
     localStorage.setItem(storageKey, JSON.stringify(state));
     storageQuotaAlertShown = false;
@@ -3019,8 +3604,12 @@ function migrateState(rawState) {
   const migrated = {
     members: Array.isArray(rawState?.members) ? rawState.members : defaultMembers,
     workflow: Array.isArray(rawState?.workflow) && rawState.workflow.length ? rawState.workflow.map((step) => statusMap[step] || step) : defaultWorkflow,
-    tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks
+    tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks,
+    selfMember: normalizeName(rawState?.selfMember) || selfMemberDefault
   };
+  if (!migrated.members.includes(migrated.selfMember)) {
+    migrated.selfMember = migrated.members.includes(selfMemberDefault) ? selfMemberDefault : migrated.members[0] || selfMemberDefault;
+  }
 
   migrated.tasks = migrated.tasks.map((task, index) => {
     const type = task.type === "todo" ? "todo" : "issue";
@@ -3031,6 +3620,18 @@ function migrateState(rawState) {
     const validTodoStatus = [todoOpenStatus, todoDoneStatus].includes(mappedStatus);
     const legacyTodoPlan = type === "issue" && Boolean(task.todoPlan || task.todayPlan);
     const recurrence = type === "todo" && task.recurrence === "daily" ? "daily" : "";
+    const normalizedLink = normalizeTaskLinkInput(task.link || extractUrl(task.notes || ""), type);
+    let relatedIssues = type === "issue"
+      ? normalizeRelatedIssues(task.relatedIssues, normalizedLink)
+      : normalizeRelatedIssues(task.relatedIssues, normalizedLink);
+    let quality = type === "issue" ? normalizeIssueQuality(task.quality) : null;
+    if (type === "issue" && task.project === "品質分析デモ" && !relatedIssues.length) {
+      const demo = demoQualityMigration(task.title);
+      if (demo) {
+        relatedIssues = demo.relatedIssues;
+        quality = { ...quality, ...demo.quality };
+      }
+    }
     return {
       ...task,
       id: taskId,
@@ -3048,8 +3649,10 @@ function migrateState(rawState) {
       linkedIssueId: type === "todo" ? task.linkedIssueId || "" : "",
       completedAt: [todoDoneStatus, completedStatus].includes(mappedStatus) ? task.completedAt || task.due || todayOffset(0) : "",
       next: task.next || "次のアクションを確認する。",
-      link: normalizeTaskLinkInput(task.link || extractUrl(task.notes || ""), type),
+      link: normalizedLink,
       gitlab: type === "issue" ? normalizeGitLabStatus(task.gitlab) : null,
+      relatedIssues,
+      quality,
       order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || "",
       attachments: normalizeAttachments(task.attachments),
@@ -3074,6 +3677,8 @@ function migrateState(rawState) {
       recurrenceKey: "",
       next: "この Issue を調査する。",
       link: issue.link,
+      relatedIssues: [],
+      quality: null,
       linkedIssueId: issue.id,
       completedAt: "",
       order: Date.now(),
@@ -3251,7 +3856,8 @@ function issueLabel(value) {
   return `${category ? `${category.label} ` : ""}#${number}`;
 }
 
-function issueTask(title, project, owner, due, status, priority, next, notes) {
+function issueTask(title, project, owner, due, status, priority, next, notes, quality = {}, relatedIssues = []) {
+  const normalizedRelatedIssues = normalizeRelatedIssues(relatedIssues);
   return {
     id: crypto.randomUUID(),
     type: "issue",
@@ -3262,8 +3868,10 @@ function issueTask(title, project, owner, due, status, priority, next, notes) {
     status,
     priority,
     next,
-    link: "",
+    link: primaryIssueLink(normalizedRelatedIssues),
     gitlab: null,
+    relatedIssues: normalizedRelatedIssues,
+    quality: normalizeIssueQuality(quality),
     order: Date.now(),
     notes
   };
@@ -3283,6 +3891,8 @@ function todoTask(title, owner, due, priority, next, notes) {
     recurrenceKey: "",
     next,
     link: "",
+    relatedIssues: [],
+    quality: null,
     order: Date.now(),
     notes
   };
