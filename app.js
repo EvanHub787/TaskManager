@@ -2448,7 +2448,7 @@ function syncRecurrenceField() {
 function syncQualityAnalysisSection() {
   const isIssue = els.taskType.value === "issue";
   els.qualityAnalysisSection.hidden = !isIssue;
-  els.taskLinkLabel.hidden = true;
+  els.taskLinkLabel.hidden = false;
 }
 
 function defaultIssueQuality() {
