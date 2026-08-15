@@ -2760,9 +2760,7 @@ function saveTask(event) {
   const existingTask = state.tasks.find((item) => item.id === id);
   const previousRecurrenceKey = existingTask?.recurrence === "daily" ? existingTask.recurrenceKey : "";
   const relatedIssues = normalizeRelatedIssues(existingTask?.relatedIssues, existingTask?.link || "");
-  const link = type === "issue"
-    ? existingTask?.link || ""
-    : existingTask?.link || normalizeTaskLinkInput(els.taskLink.value, type);
+  const link = normalizeTaskLinkInput(els.taskLink.value, type);
   const status = els.taskStatus.value;
   const doneStatus = type === "todo" ? todoDoneStatus : completedStatus;
   const completedAt = status === doneStatus
