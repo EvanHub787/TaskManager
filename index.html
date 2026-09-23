@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TaskManager</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20260622-toast">
+  <link rel="stylesheet" href="styles.css?v=20260923-gantt">
 </head>
 
 <body>
@@ -38,6 +38,9 @@
         </button>
         <button class="nav-button" data-view="projects" type="button">
           <span class="icon">≡</span>案件
+        </button>
+        <button class="nav-button" data-view="schedule" type="button">
+          <span class="icon">▤</span>スケジュール
         </button>
         <button class="nav-button" data-view="people" type="button">
           <span class="icon" aria-hidden="true">
@@ -140,6 +143,7 @@
       <section id="boardView" class="view"></section>
       <section id="todoView" class="view"></section>
       <section id="projectsView" class="view"></section>
+      <section id="scheduleView" class="view"></section>
       <section id="peopleView" class="view"></section>
     </main>
   </div>
@@ -172,6 +176,17 @@
           <label>優先度<select id="taskPriority" required></select></label>
           <label id="taskRecurrenceLabel">繰り返し<select id="taskRecurrence"></select></label>
         </div>
+        <fieldset id="scheduleSection" class="quality-section schedule-section">
+          <legend>スケジュール</legend>
+          <div class="form-grid task-meta-grid">
+            <label>残り工数（人日）<input id="taskRemainingEffort" type="number" min="0" step="0.5" inputmode="decimal" placeholder="例: 1.5"></label>
+            <label>Queue 順位<input id="taskQueuePosition" type="text" readonly></label>
+            <label>予定開始<input id="taskPlannedStart" type="text" readonly></label>
+            <label>予定 MR（ETA）<input id="taskEta" type="text" readonly></label>
+            <label>初回 ETA<input id="taskOriginalEta" type="text" readonly></label>
+          </div>
+          <p class="dialog-description">工数は 0.5 人日単位です。入力中の予定日はプレビューで、保存時に確定します。ETA は調査・修正・テストを終えて MR に入る予定日です。</p>
+        </fieldset>
         <fieldset id="qualityAnalysisSection" class="quality-section">
           <legend>品質分析</legend>
           <div class="form-grid task-meta-grid">
@@ -265,7 +280,7 @@
 
   <datalist id="projectList"></datalist>
   <datalist id="ownerList"></datalist>
-  <script src="app.js?v=20260808-quality-hotfix"></script>
+  <script src="app.js?v=20260924-queue-capacity-fix"></script>
 </body>
 
 </html>

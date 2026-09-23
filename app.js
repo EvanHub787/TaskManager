@@ -21,6 +21,18 @@ const stateStoreName = "state";
 const recoveryStoreName = "recovery";
 const maxUndoEntries = 30;
 const maxRecoveryPoints = 12;
+const capacityStatuses = ["調査中", "修正中", "テスト中"];
+const personDayHours = 8;
+const effortStepDays = 0.5;
+const japaneseHolidayCoveredThrough = "2027-12-31";
+const japaneseHolidayDates = new Set([
+  "2026-01-01", "2026-01-12", "2026-02-11", "2026-02-23", "2026-03-20", "2026-04-29",
+  "2026-05-03", "2026-05-04", "2026-05-05", "2026-05-06", "2026-07-20", "2026-08-11",
+  "2026-09-21", "2026-09-22", "2026-09-23", "2026-10-12", "2026-11-03", "2026-11-23",
+  "2027-01-01", "2027-01-11", "2027-02-11", "2027-02-23", "2027-03-21", "2027-03-22",
+  "2027-04-29", "2027-05-03", "2027-05-04", "2027-05-05", "2027-07-19", "2027-08-11",
+  "2027-09-20", "2027-09-23", "2027-10-11", "2027-11-03", "2027-11-23"
+]);
 
 const sampleTasks = [
   issueTask("Issue 対応フローを確認", "チーム管理", "自分", todayOffset(0), "調査中", "高", "Issue を調査、修正、テスト、MR の流れで管理できるか確認する。", "Issue 画面でフローをカスタマイズできます。"),
@@ -82,6 +94,7 @@ let gitlabRefreshing = false;
 let gitlabTitleRequestId = 0;
 let lastManualTaskTitleValue = "";
 let taskDialogDraft = null;
+let ganttWeekOffset = 0;
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -90,6 +103,7 @@ const els = {
   boardView: document.querySelector("#boardView"),
   todoView: document.querySelector("#todoView"),
   projectsView: document.querySelector("#projectsView"),
+  scheduleView: document.querySelector("#scheduleView"),
   peopleView: document.querySelector("#peopleView"),
   todayFocus: document.querySelector("#todayFocus"),
   searchInput: document.querySelector("#searchInput"),
@@ -136,6 +150,12 @@ const els = {
   qualityReproducibility: document.querySelector("#qualityReproducibility"),
   qualityExternalDependency: document.querySelector("#qualityExternalDependency"),
   qualityDiscoveryPhase: document.querySelector("#qualityDiscoveryPhase"),
+  scheduleSection: document.querySelector("#scheduleSection"),
+  taskRemainingEffort: document.querySelector("#taskRemainingEffort"),
+  taskQueuePosition: document.querySelector("#taskQueuePosition"),
+  taskPlannedStart: document.querySelector("#taskPlannedStart"),
+  taskEta: document.querySelector("#taskEta"),
+  taskOriginalEta: document.querySelector("#taskOriginalEta"),
   taskImages: document.querySelector("#taskImages"),
   taskAttachmentList: document.querySelector("#taskAttachmentList"),
   imagePreviewDialog: document.querySelector("#imagePreviewDialog"),
@@ -235,8 +255,15 @@ function bindEvents() {
     syncTaskNextLabel();
     syncRecurrenceField();
     syncQualityAnalysisSection();
+    syncScheduleSection();
+    previewTaskSchedule();
   });
-  els.taskStatus.addEventListener("change", syncCompletedAtField);
+  els.taskStatus.addEventListener("change", () => {
+    syncCompletedAtField();
+    previewTaskSchedule();
+  });
+  els.taskRemainingEffort.addEventListener("input", previewTaskSchedule);
+  els.taskOwner.addEventListener("input", previewTaskSchedule);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
@@ -289,6 +316,7 @@ function render() {
   renderBoard();
   renderTodo();
   renderProjects();
+  renderSchedule();
   renderPeople();
   renderSearchAssist();
   wireClearSearchButtons();
@@ -941,25 +969,172 @@ function renderProjects() {
   });
 }
 
+function renderSchedule() {
+  const dayCount = 42;
+  const rangeStart = mondayOfWeek(addCalendarDays(todayOffset(0), ganttWeekOffset * 7));
+  const days = Array.from({ length: dayCount }, (_, index) => addCalendarDays(rangeStart, index));
+  const rangeEnd = days[days.length - 1];
+  const visibleIds = new Set(filteredTasks().map((task) => task.id));
+  const groups = state.members.map((member) => {
+    const allQueue = state.tasks
+      .filter((task) => visibleIds.has(task.id) && task.owner === member && isCapacityIssue(task))
+      .sort((a, b) => (a.schedule?.queueOrder ?? 0) - (b.schedule?.queueOrder ?? 0));
+    const scheduled = allQueue.filter((task) => task.schedule?.plannedStart && task.schedule?.eta);
+    const missing = allQueue.filter((task) => !task.schedule?.plannedStart || !task.schedule?.eta);
+    return { member, scheduled, missing };
+  });
+  const scheduledCount = groups.reduce((sum, group) => sum + group.scheduled.length, 0);
+  const missingCount = groups.reduce((sum, group) => sum + group.missing.length, 0);
+
+  els.scheduleView.innerHTML = `
+    <div class="gantt-toolbar">
+      <div>
+        <strong>${escapeHtml(formatGanttRange(rangeStart, rangeEnd))}</strong>
+        <span>${scheduledCount} Issue${missingCount ? ` · 工数未設定 ${missingCount}` : ""}</span>
+      </div>
+      <div class="gantt-actions">
+        <button class="secondary-button" data-gantt-shift="-1" type="button">← 1週</button>
+        <button class="secondary-button" data-gantt-today type="button">今週</button>
+        <button class="secondary-button" data-gantt-shift="1" type="button">1週 →</button>
+      </div>
+    </div>
+    <div class="gantt-legend">
+      <span><i class="gantt-legend-dot research"></i>調査中</span>
+      <span><i class="gantt-legend-dot fixing"></i>修正中</span>
+      <span><i class="gantt-legend-dot testing"></i>テスト中</span>
+      <span><i class="gantt-legend-dot risk"></i>期限超過見込み</span>
+      <span class="gantt-note">MR・完了・Todo は Capacity 対象外</span>
+    </div>
+    <div class="gantt-scroll">
+      <div class="gantt-chart" style="--gantt-days:${dayCount}">
+        ${ganttHeader(days)}
+        ${groups.map((group) => ganttMemberGroup(group, days, rangeStart, rangeEnd)).join("")}
+      </div>
+    </div>
+  `;
+
+  els.scheduleView.querySelectorAll("[data-gantt-shift]").forEach((button) => {
+    button.addEventListener("click", () => {
+      ganttWeekOffset += Number(button.dataset.ganttShift);
+      renderSchedule();
+    });
+  });
+  els.scheduleView.querySelector("[data-gantt-today]")?.addEventListener("click", () => {
+    ganttWeekOffset = 0;
+    renderSchedule();
+  });
+  els.scheduleView.querySelectorAll("[data-gantt-task]").forEach((button) => {
+    button.addEventListener("click", () => openTaskDialog(button.dataset.ganttTask));
+  });
+}
+
+function ganttHeader(days) {
+  return `
+    <div class="gantt-row gantt-header-row">
+      <div class="gantt-label gantt-header-label">担当 / Issue</div>
+      ${days.map((dateString, index) => {
+        const date = new Date(`${dateString}T00:00:00`);
+        const newMonth = index === 0 || date.getDate() === 1;
+        return `<div class="gantt-day-head ${ganttDayClass(dateString)}" style="grid-column:${index + 2}" title="${escapeHtml(dateString)}">
+          <span>${newMonth ? `${date.getMonth() + 1}月` : ""}</span>
+          <strong>${date.getDate()}</strong>
+          <small>${["日", "月", "火", "水", "木", "金", "土"][date.getDay()]}</small>
+        </div>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+function ganttMemberGroup(group, days, rangeStart, rangeEnd) {
+  const rows = group.scheduled
+    .filter((task) => task.schedule.eta >= rangeStart && task.schedule.plannedStart <= rangeEnd)
+    .map((task) => ganttTaskRow(task, days, rangeStart, rangeEnd))
+    .join("");
+  const missingRows = group.missing.map((task) => ganttMissingTaskRow(task, days)).join("");
+  const missingText = group.missing.length ? `${group.missing.length} 件は未計算` : "";
+  return `
+    <div class="gantt-member-row">
+      <div class="gantt-member-label">${escapeHtml(group.member)}<span>${escapeHtml(missingText)}</span></div>
+    </div>
+    ${rows}${missingRows}${rows || missingRows ? "" : `<div class="gantt-row gantt-empty-row"><div class="gantt-label">この期間の予定なし</div>${ganttBackgroundCells(days)}</div>`}
+  `;
+}
+
+function ganttMissingTaskRow(task, days) {
+  const schedule = normalizeTaskSchedule(task.schedule);
+  const reason = schedule.remainingEffortDays === null
+    ? "工数を設定"
+    : schedule.calculationStatus === "missing_capacity"
+      ? "Capacityを設定"
+      : "スケジュール未計算";
+  return `
+    <div class="gantt-row gantt-unscheduled-row">
+      <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>#${(task.schedule?.queueOrder ?? 0) + 1} · ${escapeHtml(task.status)}</span>
+      </button>
+      ${ganttBackgroundCells(days)}
+      <button class="gantt-unscheduled-badge" data-gantt-task="${task.id}" type="button">${reason}</button>
+    </div>
+  `;
+}
+
+function ganttTaskRow(task, days, rangeStart, rangeEnd) {
+  const start = task.schedule.plannedStart < rangeStart ? rangeStart : task.schedule.plannedStart;
+  const end = task.schedule.eta > rangeEnd ? rangeEnd : task.schedule.eta;
+  const startIndex = naturalDaysBetween(rangeStart, start);
+  const span = Math.max(1, naturalDaysBetween(start, end) + 1);
+  const risk = task.due && task.schedule.eta > task.due;
+  const statusClass = task.status === "調査中" ? "research" : task.status === "修正中" ? "fixing" : "testing";
+  const clippedStart = task.schedule.plannedStart < rangeStart ? " clipped-start" : "";
+  const clippedEnd = task.schedule.eta > rangeEnd ? " clipped-end" : "";
+  return `
+    <div class="gantt-row">
+      <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>#${(task.schedule.queueOrder ?? 0) + 1} · ${formatPersonDays(task.schedule.remainingEffortDays)}</span>
+      </button>
+      ${ganttBackgroundCells(days)}
+      <button class="gantt-bar ${statusClass}${risk ? " risk" : ""}${clippedStart}${clippedEnd}" data-gantt-task="${task.id}" type="button"
+        style="grid-column:${startIndex + 2} / span ${span}"
+        title="${escapeHtml(`${task.title} | ${task.schedule.plannedStart} → ${task.schedule.eta} | 期限 ${task.due}`)}">
+        <span>${escapeHtml(task.status)}</span><strong>${escapeHtml(task.schedule.eta)}</strong>
+      </button>
+    </div>
+  `;
+}
+
+function ganttBackgroundCells(days) {
+  return days.map((dateString, index) => `<div class="gantt-day-cell ${ganttDayClass(dateString)}" style="grid-column:${index + 2}"></div>`).join("");
+}
+
+function ganttDayClass(dateString) {
+  const date = new Date(`${dateString}T00:00:00`);
+  const classes = [];
+  if (date.getDay() === 0 || date.getDay() === 6) classes.push("is-weekend");
+  if (japaneseHolidayDates.has(dateString)) classes.push("is-holiday");
+  if (dateString === todayOffset(0)) classes.push("is-today");
+  return classes.join(" ");
+}
+
+function mondayOfWeek(dateString) {
+  const date = new Date(`${dateString}T00:00:00`);
+  const offset = date.getDay() === 0 ? -6 : 1 - date.getDay();
+  date.setDate(date.getDate() + offset);
+  return localDateString(date);
+}
+
+function naturalDaysBetween(from, to) {
+  return Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / 86400000);
+}
+
+function formatGanttRange(start, end) {
+  return `${start.replaceAll("-", "/")} – ${end.replaceAll("-", "/")}`;
+}
+
 function renderPeople() {
   const memberSet = new Set(state.members.map(normalizeName));
   const selfMember = selfMemberName();
-  const rows = state.members.map((member) => {
-    const tasks = state.tasks.filter((task) => task.owner === member);
-    const open = tasks.filter((task) => !isDone(task));
-    const overdue = open.filter((task) => daysUntil(task.due) < 0);
-    const issues = open.filter((task) => task.type === "issue");
-    const todos = open.filter((task) => task.type === "todo");
-    return `
-      <tr>
-        <td><button class="table-link" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button>${member === selfMember ? `<span class="self-member-badge">自分</span>` : ""}</td>
-        <td>${open.length}</td>
-        <td>${issues.length}</td>
-        <td>${todos.length}</td>
-        <td>${overdue.length}</td>
-      </tr>
-    `;
-  }).join("");
   const externalIssueGroups = groupBy(
     state.tasks.filter((task) => task.type === "issue" && !isDone(task) && !memberSet.has(normalizeName(task.owner))),
     "owner"
@@ -1010,7 +1185,14 @@ function renderPeople() {
     `;
   }).join("");
 
+  const schedulePanels = state.members.map((member) => scheduleMemberPanel(member, member === selfMember)).join("");
+
   els.peopleView.innerHTML = `
+    <div class="schedule-overview-head">
+      <div><h3>メンバー Queue</h3><p>工数は 0.5 人日単位、1 人日 = 8 時間。調査中・修正中・テスト中を直列でスケジュールします。</p></div>
+      <span class="tag">日本祝日対応 ～ ${escapeHtml(japaneseHolidayCoveredThrough)}</span>
+    </div>
+    <div class="schedule-member-grid">${schedulePanels}</div>
     <details class="member-panel collapsible-panel">
       <summary>メンバー編集</summary>
       <div class="collapsible-body">
@@ -1021,10 +1203,66 @@ function renderPeople() {
         <div class="member-list">${memberRows}</div>
       </div>
     </details>
-    <table class="list-table"><thead><tr><th>担当者</th><th>未完了</th><th>Issue</th><th>Todo</th><th>期限超過</th></tr></thead><tbody>${rows}</tbody></table>
     ${externalIssueSection}
   `;
   wireMemberButtons();
+}
+
+function scheduleMemberPanel(member, isSelf) {
+  const summary = ownerScheduleSummary(member);
+  const capacity = state.scheduling.memberSettings[member]?.dailyCapacityDays ?? 1;
+  const waitingMr = state.tasks.filter((task) => task.type === "issue" && task.owner === member && task.status === "MR").length;
+  const rows = summary.queue.length
+    ? summary.queue.map((task, index) => scheduleQueueRow(task, index, summary.queue.length)).join("")
+    : `<div class="schedule-empty">スケジュール対象の Issue はありません</div>`;
+  return `
+    <section class="schedule-member-card">
+      <div class="schedule-member-head">
+        <div><button class="table-link schedule-member-name" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button>${isSelf ? `<span class="self-member-badge">自分</span>` : ""}</div>
+        <label class="capacity-control">1日 Capacity
+          <select data-member-capacity="${escapeHtml(member)}">
+            ${[0, 0.5, 1].map((value) => `<option value="${value}"${capacity === value ? " selected" : ""}>${value} 人日</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="schedule-stats">
+        <span><strong>${formatPersonDays(summary.totalEffort)}</strong>残り工数</span>
+        <span><strong>${summary.queueEndDate || "—"}</strong>Queue 終了</span>
+        <span><strong>${formatPersonDays(summary.weeklyRemaining)}</strong>今週残り</span>
+        <span><strong>${waitingMr}</strong>MR 待ち</span>
+      </div>
+      ${summary.missingEffort ? `<div class="schedule-warning">${summary.missingEffort} 件の工数が未設定です</div>` : ""}
+      <div class="schedule-queue">${rows}</div>
+    </section>
+  `;
+}
+
+function scheduleQueueRow(task, index, length) {
+  const schedule = normalizeTaskSchedule(task.schedule);
+  const risk = schedule.eta && task.due && schedule.eta > task.due;
+  return `
+    <div class="schedule-queue-row">
+      <div class="queue-order-controls">
+        <span>${index + 1}</span>
+        <button data-queue-move="up" data-queue-task="${task.id}" type="button" ${index === 0 ? "disabled" : ""} aria-label="上へ">↑</button>
+        <button data-queue-move="down" data-queue-task="${task.id}" type="button" ${index === length - 1 ? "disabled" : ""} aria-label="下へ">↓</button>
+      </div>
+      <button class="schedule-issue-main" data-title-edit="${task.id}" type="button">
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(task.status)} · ${schedule.remainingEffortDays === null ? "工数未設定" : formatPersonDays(schedule.remainingEffortDays)}</span>
+      </button>
+      <div class="schedule-dates${risk ? " is-risk" : ""}">
+        <span>開始 ${schedule.plannedStart || "—"}</span>
+        <strong>ETA ${schedule.eta || "—"}</strong>
+        <span>期限 ${task.due || "—"}</span>
+      </div>
+    </div>
+  `;
+}
+
+function formatPersonDays(value) {
+  const number = Number(value || 0);
+  return `${Number.isInteger(number) ? number : number.toFixed(1)} 人日`;
 }
 
 function openDailyReport() {
@@ -1345,12 +1583,22 @@ function taskCard(task, enableDrag = false) {
       ${nextAction}
       <div class="tags">
         ${priorityControl}
+        ${task.type === "issue" ? scheduleBadge(task) : ""}
         <span class="tag-spacer"></span>
         ${canConvert ? convertButton : ""}
         ${canFinish ? doneButton : ""}
       </div>
     </article>
   `;
+}
+
+function scheduleBadge(task) {
+  const schedule = normalizeTaskSchedule(task.schedule);
+  if (task.status === "MR") return `<span class="tag schedule-tag waiting">MR 待ち</span>`;
+  if (!isCapacityStatus(task.status)) return "";
+  if (schedule.remainingEffortDays === null) return `<span class="tag schedule-tag missing">工数未設定</span>`;
+  const riskClass = schedule.eta && task.due && schedule.eta > task.due ? " risk" : "";
+  return `<span class="tag schedule-tag${riskClass}">${formatPersonDays(schedule.remainingEffortDays)} · ETA ${escapeHtml(schedule.eta || "—")}</span>`;
 }
 
 function projectQuickControl(task) {
@@ -2062,6 +2310,45 @@ function wireMemberButtons() {
   els.peopleView.querySelectorAll("[data-filter-member]").forEach((button) => {
     button.addEventListener("click", () => filterTasksByMember(button.dataset.filterMember));
   });
+
+  els.peopleView.querySelectorAll("[data-title-edit]").forEach((button) => {
+    button.addEventListener("click", () => openTaskDialog(button.dataset.titleEdit));
+  });
+
+  els.peopleView.querySelectorAll("[data-member-capacity]").forEach((select) => {
+    select.addEventListener("change", () => updateMemberCapacity(select.dataset.memberCapacity, Number(select.value)));
+  });
+
+  els.peopleView.querySelectorAll("[data-queue-move]").forEach((button) => {
+    button.addEventListener("click", () => moveOwnerQueueTask(button.dataset.queueTask, button.dataset.queueMove));
+  });
+}
+
+function updateMemberCapacity(member, value) {
+  if (!state.members.includes(member) || ![0, 0.5, 1].includes(value)) return;
+  markStateMutation(`「${member}」の Capacity を変更`);
+  state.scheduling.memberSettings[member] = {
+    ...(state.scheduling.memberSettings[member] || { capacityOverrides: {} }),
+    dailyCapacityDays: value
+  };
+  render();
+}
+
+function moveOwnerQueueTask(taskId, direction) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task || !isCapacityIssue(task)) return;
+  const queue = state.tasks
+    .filter((item) => item.owner === task.owner && isCapacityIssue(item))
+    .sort((a, b) => (a.schedule?.queueOrder ?? 0) - (b.schedule?.queueOrder ?? 0));
+  const fromIndex = queue.findIndex((item) => item.id === taskId);
+  const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
+  if (fromIndex < 0 || toIndex < 0 || toIndex >= queue.length) return;
+  markStateMutation(`「${task.owner}」の Issue Queue を変更`);
+  [queue[fromIndex], queue[toIndex]] = [queue[toIndex], queue[fromIndex]];
+  queue.forEach((item, index) => {
+    item.schedule = { ...normalizeTaskSchedule(item.schedule), queueOrder: index };
+  });
+  render();
 }
 
 function addWorkflowStep(rawName) {
@@ -2192,11 +2479,18 @@ function renameMember(index, rawName) {
     markStateMutation(`担当者を「${newName}」へ統合`);
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
     state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
+    const oldSetting = state.scheduling?.memberSettings?.[oldName];
+    if (!state.scheduling.memberSettings[newName] && oldSetting) state.scheduling.memberSettings[newName] = oldSetting;
+    delete state.scheduling.memberSettings[oldName];
     if (wasSelf) state.selfMember = newName;
   } else {
     markStateMutation(`メンバーを「${newName}」へ変更`);
     state.members[index] = newName;
     state.tasks = state.tasks.map((task) => task.owner === oldName ? { ...task, owner: newName } : task);
+    if (state.scheduling?.memberSettings?.[oldName]) {
+      state.scheduling.memberSettings[newName] = state.scheduling.memberSettings[oldName];
+      delete state.scheduling.memberSettings[oldName];
+    }
     if (wasSelf) state.selfMember = newName;
   }
   render();
@@ -2220,6 +2514,7 @@ function deleteMember(index) {
   }
   markStateMutation(`メンバー「${member}」を削除`);
   state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
+  if (state.scheduling?.memberSettings) delete state.scheduling.memberSettings[member];
   if (state.selfMember === member) state.selfMember = selfMemberName();
   render();
 }
@@ -2342,6 +2637,7 @@ function switchView(view) {
     board: "Issue 看板",
     todo: "Todo",
     projects: "案件概要",
+    schedule: "スケジュール・ガント",
     people: "メンバー管理"
   };
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
@@ -2375,6 +2671,12 @@ function openTaskDialog(id, overrides = {}) {
   els.taskNext.value = overrides.next || task?.next || "";
   els.taskLink.value = overrides.link || task?.link || "";
   els.taskNotes.value = overrides.notes || task?.notes || "";
+  const schedule = normalizeTaskSchedule(overrides.schedule || task?.schedule);
+  els.taskRemainingEffort.value = schedule.remainingEffortDays ?? "";
+  els.taskQueuePosition.value = Number.isFinite(schedule.queueOrder) ? String(schedule.queueOrder + 1) : "未設定";
+  els.taskPlannedStart.value = schedule.plannedStart || "未計算";
+  els.taskEta.value = schedule.eta || "未計算";
+  els.taskOriginalEta.value = schedule.originalEta || "未計算";
   fillQualityForm(type === "issue" ? normalizeIssueQuality(overrides.quality || task?.quality) : defaultIssueQuality());
   currentTaskAttachments = normalizeAttachments(overrides.attachments || task?.attachments || []);
   els.taskImages.value = "";
@@ -2384,11 +2686,13 @@ function openTaskDialog(id, overrides = {}) {
   syncTaskNextLabel();
   syncRecurrenceField();
   syncQualityAnalysisSection();
+  syncScheduleSection();
   els.dialog.showModal();
   autoResizeTaskNext();
   if (taskDialogDraft && taskDialogDraft.id === (task?.id || "")) {
     restoreTaskDialogDraft();
   }
+  previewTaskSchedule();
 }
 
 function restoreTaskDialogDraft() {
@@ -2404,6 +2708,7 @@ function restoreTaskDialogDraft() {
   els.taskRecurrence.value = d.recurrence;
   els.taskNext.value = d.next;
   els.taskNotes.value = d.notes;
+  els.taskRemainingEffort.value = d.remainingEffort;
   els.qualityAnalysisStatus.value = d.qualityAnalysisStatus;
   els.qualityRouteType.value = d.qualityRouteType;
   els.qualityScope.value = d.qualityScope;
@@ -2449,6 +2754,50 @@ function syncQualityAnalysisSection() {
   const isIssue = els.taskType.value === "issue";
   els.qualityAnalysisSection.hidden = !isIssue;
   els.taskLinkLabel.hidden = false;
+}
+
+function syncScheduleSection() {
+  const isIssue = els.taskType.value === "issue";
+  els.scheduleSection.hidden = !isIssue;
+  els.taskRemainingEffort.disabled = !isIssue;
+}
+
+function previewTaskSchedule() {
+  if (els.taskType.value !== "issue") return;
+  const effort = normalizeEffortDays(els.taskRemainingEffort.value);
+  if (effort === null) {
+    els.taskPlannedStart.value = "未計算";
+    els.taskEta.value = "未計算";
+    return;
+  }
+
+  const owner = normalizeName(els.taskOwner.value);
+  if (!owner || !state.members.includes(owner)) {
+    els.taskPlannedStart.value = "担当者未登録";
+    els.taskEta.value = "担当者未登録";
+    return;
+  }
+
+  const id = els.taskId.value || "__schedule_preview__";
+  const existingTask = state.tasks.find((item) => item.id === id);
+  const previewState = JSON.parse(JSON.stringify(state));
+  const previewTask = {
+    ...(existingTask || {}),
+    id,
+    type: "issue",
+    owner,
+    status: els.taskStatus.value,
+    schedule: scheduleForTaskSave(existingTask, owner, els.taskStatus.value, effort)
+  };
+  const index = previewState.tasks.findIndex((item) => item.id === id);
+  if (index >= 0) previewState.tasks[index] = previewTask;
+  else previewState.tasks.push(previewTask);
+  ensureScheduleMemberSettings(previewState);
+  ensureQueueOrders(previewState);
+  recalculateSchedules(previewState);
+  const calculated = previewState.tasks.find((item) => item.id === id)?.schedule;
+  els.taskPlannedStart.value = calculated?.plannedStart || (calculated?.calculationStatus === "missing_capacity" ? "Capacity未設定" : "未計算");
+  els.taskEta.value = calculated?.eta || (calculated?.calculationStatus === "missing_capacity" ? "Capacity未設定" : "未計算");
 }
 
 function defaultIssueQuality() {
@@ -2747,6 +3096,7 @@ function saveDraftAndClose() {
     qualityReproducibility: els.qualityReproducibility.value,
     qualityExternalDependency: els.qualityExternalDependency.value,
     qualityDiscoveryPhase: els.qualityDiscoveryPhase.value,
+    remainingEffort: els.taskRemainingEffort.value,
     attachments: [...currentTaskAttachments]
   };
   closeTaskDialog();
@@ -2770,6 +3120,9 @@ function saveTask(event) {
   const order = Number.isFinite(existingTask?.order) ? existingTask.order : defaultOrderForNewTask(type);
   const title = taskTitleValueForSave(type, existingTask);
   const quality = type === "issue" ? readQualityForm() : null;
+  const schedule = type === "issue"
+    ? scheduleForTaskSave(existingTask, els.taskOwner.value, status, els.taskRemainingEffort.value)
+    : null;
 
   const task = {
     id,
@@ -2789,6 +3142,7 @@ function saveTask(event) {
     gitlab: type === "issue" && existingTask?.link === link ? normalizeGitLabStatus(existingTask.gitlab) : null,
     relatedIssues,
     quality,
+    schedule,
     order,
     notes: els.taskNotes.value.trim(),
     attachments: normalizeAttachments(currentTaskAttachments),
@@ -2804,6 +3158,10 @@ function saveTask(event) {
     markStateMutation(`「${task.title}」を追加`);
     state.tasks.unshift(task);
   }
+
+  ensureScheduleMemberSettings(state);
+  ensureQueueOrders(state);
+  recalculateSchedules(state);
 
   if (previousRecurrenceKey && !recurrence) {
     state.tasks = state.tasks.map((item) => item.recurrenceKey === previousRecurrenceKey
@@ -2929,8 +3287,21 @@ function deleteCurrentTask() {
 function updateTask(id, patch, label = "") {
   const task = state.tasks.find((item) => item.id === id);
   if (!task) return;
-  markStateMutation(label || taskMutationLabel(task, patch));
-  state.tasks = state.tasks.map((item) => item.id === id ? touchTask(item, patch) : item);
+  let nextPatch = { ...patch };
+  if (task.type === "issue") {
+    const nextOwner = nextPatch.owner || task.owner;
+    const nextStatus = nextPatch.status || task.status;
+    const ownerChanged = nextOwner !== task.owner;
+    const entersCapacity = isCapacityStatus(nextStatus) && !isCapacityStatus(task.status);
+    if (ownerChanged || entersCapacity) {
+      nextPatch.schedule = {
+        ...normalizeTaskSchedule(task.schedule),
+        queueOrder: nextQueueOrder(nextOwner, task.id)
+      };
+    }
+  }
+  markStateMutation(label || taskMutationLabel(task, nextPatch));
+  state.tasks = state.tasks.map((item) => item.id === id ? touchTask(item, nextPatch) : item);
 }
 
 function saveOwnerChoice(taskId, value) {
@@ -3171,6 +3542,7 @@ function downloadCsv(filename, headers, rows) {
 function exportIssuesToCsv() {
   const headers = [
     "No.", "タイトル", "案件", "担当者", "期限", "ステータス", "優先度",
+    "残り工数（人日）", "Queue順位", "予定開始", "予定MR（ETA）", "初回ETA",
     "経路タイプ", "関連範囲", "再現性", "外部依存", "発見フェーズ", "原因・対策分析",
     "次のアクション／詳細", "メモ", "Issue", "作成日", "更新日"
   ];
@@ -3203,6 +3575,11 @@ function exportIssuesToCsv() {
       csvCell(task.due),
       csvCell(task.status),
       csvCell(task.priority),
+      csvCell(task.schedule?.remainingEffortDays ?? ""),
+      csvCell(Number.isFinite(task.schedule?.queueOrder) ? task.schedule.queueOrder + 1 : ""),
+      csvCell(task.schedule?.plannedStart || ""),
+      csvCell(task.schedule?.eta || ""),
+      csvCell(task.schedule?.originalEta || ""),
       csvCell(q.routeType),
       csvCell(q.scope),
       csvCell(q.reproducibility),
@@ -3600,10 +3977,12 @@ function migrateState(rawState) {
     "待辦": "未対応"
   };
   const migrated = {
+    schemaVersion: 2,
     members: Array.isArray(rawState?.members) ? rawState.members : defaultMembers,
     workflow: Array.isArray(rawState?.workflow) && rawState.workflow.length ? rawState.workflow.map((step) => statusMap[step] || step) : defaultWorkflow,
     tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks,
-    selfMember: normalizeName(rawState?.selfMember) || selfMemberDefault
+    selfMember: normalizeName(rawState?.selfMember) || selfMemberDefault,
+    scheduling: normalizeSchedulingSettings(rawState?.scheduling, Array.isArray(rawState?.members) ? rawState.members : defaultMembers)
   };
   if (!migrated.members.includes(migrated.selfMember)) {
     migrated.selfMember = migrated.members.includes(selfMemberDefault) ? selfMemberDefault : migrated.members[0] || selfMemberDefault;
@@ -3651,6 +4030,7 @@ function migrateState(rawState) {
       gitlab: type === "issue" ? normalizeGitLabStatus(task.gitlab) : null,
       relatedIssues,
       quality,
+      schedule: type === "issue" ? normalizeTaskSchedule(task.schedule, index) : null,
       order: Number.isFinite(task.order) ? task.order : index,
       notes: task.notes || "",
       attachments: normalizeAttachments(task.attachments),
@@ -3692,7 +4072,242 @@ function migrateState(rawState) {
 
   migrated.workflow = [...new Set(migrated.workflow.map(normalizeName).filter(Boolean))];
   if (!migrated.workflow.length) migrated.workflow = defaultWorkflow;
+  ensureScheduleMemberSettings(migrated);
+  ensureQueueOrders(migrated);
+  recalculateSchedules(migrated);
   return migrated;
+}
+
+function normalizeSchedulingSettings(value = {}, members = []) {
+  const rawSettings = value && typeof value === "object" ? value : {};
+  const rawMemberSettings = rawSettings.memberSettings && typeof rawSettings.memberSettings === "object"
+    ? rawSettings.memberSettings
+    : {};
+  const memberSettings = {};
+  members.map(normalizeName).filter(Boolean).forEach((member) => {
+    const raw = rawMemberSettings[member] || {};
+    const capacity = Number(raw.dailyCapacityDays);
+    memberSettings[member] = {
+      dailyCapacityDays: [0, 0.5, 1].includes(capacity) ? capacity : 1,
+      capacityOverrides: raw.capacityOverrides && typeof raw.capacityOverrides === "object" ? { ...raw.capacityOverrides } : {}
+    };
+  });
+  return {
+    unit: "person_days",
+    hoursPerPersonDay: personDayHours,
+    effortStepDays,
+    capacityStatuses: [...capacityStatuses],
+    workweek: [1, 2, 3, 4, 5],
+    holidayCalendar: {
+      region: "JP",
+      source: "CAO",
+      coveredThrough: japaneseHolidayCoveredThrough
+    },
+    additionalNonWorkingDates: Array.isArray(rawSettings.additionalNonWorkingDates) ? rawSettings.additionalNonWorkingDates : [],
+    memberSettings,
+    changeLog: Array.isArray(rawSettings.changeLog) ? rawSettings.changeLog : []
+  };
+}
+
+function normalizeTaskSchedule(value = {}, fallbackOrder = null) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    remainingEffortDays: normalizeEffortDays(raw.remainingEffortDays),
+    queueOrder: Number.isFinite(raw.queueOrder) ? raw.queueOrder : (Number.isFinite(fallbackOrder) ? fallbackOrder : null),
+    plannedStart: raw.plannedStart || "",
+    eta: raw.eta || "",
+    originalEta: raw.originalEta || "",
+    calculatedAt: raw.calculatedAt || "",
+    calculationStatus: raw.calculationStatus || "missing_effort"
+  };
+}
+
+function normalizeEffortDays(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.round(number / effortStepDays) * effortStepDays;
+}
+
+function ensureScheduleMemberSettings(targetState) {
+  targetState.scheduling ||= normalizeSchedulingSettings({}, targetState.members);
+  targetState.scheduling.memberSettings ||= {};
+  targetState.members.forEach((member) => {
+    if (!targetState.scheduling.memberSettings[member]) {
+      targetState.scheduling.memberSettings[member] = { dailyCapacityDays: 1, capacityOverrides: {} };
+    }
+  });
+}
+
+function isCapacityStatus(status) {
+  return capacityStatuses.includes(status);
+}
+
+function isCapacityIssue(task) {
+  return task?.type === "issue" && !isDone(task) && isCapacityStatus(task.status);
+}
+
+function ensureQueueOrders(targetState) {
+  targetState.members.forEach((member) => {
+    const queue = targetState.tasks
+      .filter((task) => task.owner === member && isCapacityIssue(task))
+      .sort((a, b) => {
+        const aOrder = Number.isFinite(a.schedule?.queueOrder) ? a.schedule.queueOrder : Number.MAX_SAFE_INTEGER;
+        const bOrder = Number.isFinite(b.schedule?.queueOrder) ? b.schedule.queueOrder : Number.MAX_SAFE_INTEGER;
+        return aOrder - bOrder || sortByBoardOrder(a, b) || String(a.id).localeCompare(String(b.id));
+      });
+    queue.forEach((task, index) => {
+      task.schedule = { ...normalizeTaskSchedule(task.schedule), queueOrder: index };
+    });
+  });
+}
+
+function recalculateSchedules(targetState) {
+  const memberSet = new Set(targetState.members);
+  const now = new Date().toISOString();
+  targetState.tasks.forEach((task) => {
+    if (task.type !== "issue") return;
+    const schedule = normalizeTaskSchedule(task.schedule);
+    if (isDone(task)) task.schedule = scheduleWithStatus(schedule, "completed", schedule.plannedStart, schedule.eta, now);
+    else if (task.status === "MR") task.schedule = scheduleWithStatus(schedule, "waiting_mr", schedule.plannedStart, schedule.eta, now);
+    else if (!memberSet.has(task.owner)) task.schedule = scheduleWithStatus(schedule, "external_owner", "", "", now);
+  });
+
+  targetState.members.forEach((member) => {
+    const queue = targetState.tasks
+      .filter((task) => task.owner === member && isCapacityIssue(task))
+      .sort((a, b) => (a.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER));
+    let cursor = nextDateWithCapacity(targetState, member, todayOffset(0), true);
+    let available = cursor ? capacityForDate(targetState, member, cursor) : 0;
+
+    queue.forEach((task, index) => {
+      const schedule = { ...normalizeTaskSchedule(task.schedule), queueOrder: index };
+      if (schedule.remainingEffortDays === null) {
+        task.schedule = scheduleWithStatus(schedule, "missing_effort", "", "", now);
+        return;
+      }
+      // The preceding issue may have exhausted this day, not the member's future capacity.
+      if (cursor && available <= 0) {
+        cursor = nextDateWithCapacity(targetState, member, addCalendarDays(cursor, 1), true);
+        available = cursor ? capacityForDate(targetState, member, cursor) : 0;
+      }
+      if (!cursor || available <= 0) {
+        task.schedule = scheduleWithStatus(schedule, "missing_capacity", "", "", now);
+        return;
+      }
+      let remaining = schedule.remainingEffortDays;
+      let plannedStart = cursor;
+      let guard = 0;
+      while (remaining > 0 && cursor && guard < 1500) {
+        guard += 1;
+        if (available <= 0) {
+          cursor = nextDateWithCapacity(targetState, member, addCalendarDays(cursor, 1), true);
+          available = cursor ? capacityForDate(targetState, member, cursor) : 0;
+          if (!cursor) break;
+        }
+        const allocated = Math.min(remaining, available);
+        remaining = Math.max(0, remaining - allocated);
+        available = Math.max(0, available - allocated);
+      }
+      const eta = remaining <= 0 ? cursor : "";
+      task.schedule = scheduleWithStatus(schedule, eta ? "scheduled" : "missing_capacity", plannedStart, eta, now);
+    });
+  });
+}
+
+function scheduleWithStatus(schedule, status, plannedStart, eta, now) {
+  const changed = schedule.calculationStatus !== status || schedule.plannedStart !== plannedStart || schedule.eta !== eta;
+  return {
+    ...schedule,
+    calculationStatus: status,
+    plannedStart,
+    eta,
+    originalEta: schedule.originalEta || eta || "",
+    calculatedAt: changed ? now : schedule.calculatedAt
+  };
+}
+
+function capacityForDate(targetState, member, dateString) {
+  if (!isWorkingDate(targetState, dateString)) return 0;
+  const setting = targetState.scheduling?.memberSettings?.[member];
+  const override = setting?.capacityOverrides?.[dateString];
+  if ([0, 0.5, 1].includes(Number(override))) return Number(override);
+  return [0, 0.5, 1].includes(Number(setting?.dailyCapacityDays)) ? Number(setting.dailyCapacityDays) : 1;
+}
+
+function isWorkingDate(targetState, dateString) {
+  const date = new Date(`${dateString}T00:00:00`);
+  const day = date.getDay();
+  if (day === 0 || day === 6) return false;
+  if (japaneseHolidayDates.has(dateString)) return false;
+  return !targetState.scheduling?.additionalNonWorkingDates?.includes(dateString);
+}
+
+function nextDateWithCapacity(targetState, member, startDate, includeStart = true) {
+  let date = includeStart ? startDate : addCalendarDays(startDate, 1);
+  for (let index = 0; index < 1500; index += 1) {
+    if (capacityForDate(targetState, member, date) > 0) return date;
+    date = addCalendarDays(date, 1);
+  }
+  return "";
+}
+
+function addCalendarDays(dateString, days) {
+  const date = new Date(`${dateString}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return localDateString(date);
+}
+
+function localDateString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function nextQueueOrder(owner, excludeId = "") {
+  const orders = state.tasks
+    .filter((task) => task.id !== excludeId && task.owner === owner && isCapacityIssue(task))
+    .map((task) => task.schedule?.queueOrder)
+    .filter(Number.isFinite);
+  return orders.length ? Math.max(...orders) + 1 : 0;
+}
+
+function scheduleForTaskSave(existingTask, owner, status, effortValue) {
+  const existing = normalizeTaskSchedule(existingTask?.schedule);
+  const entersCapacity = isCapacityStatus(status) && (!existingTask || !isCapacityStatus(existingTask.status));
+  const ownerChanged = Boolean(existingTask && existingTask.owner !== owner);
+  return {
+    ...existing,
+    remainingEffortDays: normalizeEffortDays(effortValue),
+    queueOrder: entersCapacity || ownerChanged || !Number.isFinite(existing.queueOrder)
+      ? nextQueueOrder(owner, existingTask?.id)
+      : existing.queueOrder
+  };
+}
+
+function ownerScheduleSummary(member) {
+  const queue = state.tasks
+    .filter((task) => task.owner === member && isCapacityIssue(task))
+    .sort((a, b) => (a.schedule?.queueOrder ?? 0) - (b.schedule?.queueOrder ?? 0));
+  const totalEffort = queue.reduce((sum, task) => sum + (task.schedule?.remainingEffortDays || 0), 0);
+  const today = new Date(`${todayOffset(0)}T00:00:00`);
+  const weekEnd = new Date(today);
+  weekEnd.setDate(today.getDate() + ((7 - today.getDay()) % 7));
+  let weeklyCapacity = 0;
+  for (let cursor = new Date(today); cursor <= weekEnd; cursor.setDate(cursor.getDate() + 1)) {
+    weeklyCapacity += capacityForDate(state, member, localDateString(cursor));
+  }
+  const scheduledEffort = queue.reduce((sum, task) => sum + (task.schedule?.remainingEffortDays || 0), 0);
+  const queueEndDate = [...queue].reverse().find((task) => task.schedule?.eta)?.schedule.eta || "";
+  return {
+    queue,
+    totalEffort,
+    weeklyCapacity,
+    weeklyRemaining: Math.max(0, weeklyCapacity - Math.min(weeklyCapacity, scheduledEffort)),
+    queueEndDate,
+    missingEffort: queue.filter((task) => task.schedule?.remainingEffortDays === null).length
+  };
 }
 
 function ensureDailyRecurringTodos() {
