@@ -95,6 +95,8 @@ let gitlabTitleRequestId = 0;
 let lastManualTaskTitleValue = "";
 let taskDialogDraft = null;
 let ganttWeekOffset = 0;
+let suppressScheduleClickUntil = 0;
+let ganttDragTaskId = "";
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -263,6 +265,7 @@ function bindEvents() {
     previewTaskSchedule();
   });
   els.taskRemainingEffort.addEventListener("input", previewTaskSchedule);
+  els.taskQueuePosition.addEventListener("input", previewTaskSchedule);
   els.taskOwner.addEventListener("input", previewTaskSchedule);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
@@ -1003,6 +1006,7 @@ function renderSchedule() {
       <span><i class="gantt-legend-dot fixing"></i>修正中</span>
       <span><i class="gantt-legend-dot testing"></i>テスト中</span>
       <span><i class="gantt-legend-dot risk"></i>期限超過見込み</span>
+      <span class="gantt-note">⠿ を上下にドラッグして Queue 順位を変更</span>
       <span class="gantt-note">MR・完了・Todo は Capacity 対象外</span>
     </div>
     <div class="gantt-scroll">
@@ -1024,8 +1028,11 @@ function renderSchedule() {
     renderSchedule();
   });
   els.scheduleView.querySelectorAll("[data-gantt-task]").forEach((button) => {
-    button.addEventListener("click", () => openTaskDialog(button.dataset.ganttTask));
+    button.addEventListener("click", () => {
+      if (Date.now() > suppressScheduleClickUntil) openTaskDialog(button.dataset.ganttTask);
+    });
   });
+  wireGanttDragAndDrop();
 }
 
 function ganttHeader(days) {
@@ -1068,9 +1075,9 @@ function ganttMissingTaskRow(task, days) {
       ? "Capacityを設定"
       : "スケジュール未計算";
   return `
-    <div class="gantt-row gantt-unscheduled-row">
+    <div class="gantt-row gantt-task-row gantt-unscheduled-row" data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}" draggable="true">
       <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
-        <strong>${escapeHtml(task.title)}</strong>
+        <strong><i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>${escapeHtml(task.title)}</strong>
         <span>#${(task.schedule?.queueOrder ?? 0) + 1} · ${escapeHtml(task.status)}</span>
       </button>
       ${ganttBackgroundCells(days)}
@@ -1089,9 +1096,9 @@ function ganttTaskRow(task, days, rangeStart, rangeEnd) {
   const clippedStart = task.schedule.plannedStart < rangeStart ? " clipped-start" : "";
   const clippedEnd = task.schedule.eta > rangeEnd ? " clipped-end" : "";
   return `
-    <div class="gantt-row">
+    <div class="gantt-row gantt-task-row" data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}" draggable="true">
       <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
-        <strong>${escapeHtml(task.title)}</strong>
+        <strong><i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>${escapeHtml(task.title)}</strong>
         <span>#${(task.schedule.queueOrder ?? 0) + 1} · ${formatPersonDays(task.schedule.remainingEffortDays)}</span>
       </button>
       ${ganttBackgroundCells(days)}
@@ -1106,6 +1113,65 @@ function ganttTaskRow(task, days, rangeStart, rangeEnd) {
 
 function ganttBackgroundCells(days) {
   return days.map((dateString, index) => `<div class="gantt-day-cell ${ganttDayClass(dateString)}" style="grid-column:${index + 2}"></div>`).join("");
+}
+
+function wireGanttDragAndDrop() {
+  const rows = els.scheduleView.querySelectorAll("[data-gantt-task-row]");
+  rows.forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      ganttDragTaskId = row.dataset.ganttTaskRow || "";
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-gantt-task", ganttDragTaskId);
+      event.dataTransfer.setData("text/plain", ganttDragTaskId);
+      row.classList.add("dragging");
+    });
+
+    row.addEventListener("dragover", (event) => {
+      const draggedId = ganttDragTaskId || event.dataTransfer.getData("application/x-gantt-task");
+      const dragged = state.tasks.find((task) => task.id === draggedId);
+      if (!dragged || draggedId === row.dataset.ganttTaskRow || dragged.owner !== row.dataset.ganttOwner) return;
+      event.preventDefault();
+      const before = event.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      row.classList.toggle("drop-before", before);
+      row.classList.toggle("drop-after", !before);
+    });
+
+    row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+
+    row.addEventListener("drop", (event) => {
+      const draggedId = ganttDragTaskId || event.dataTransfer.getData("application/x-gantt-task");
+      const dragged = state.tasks.find((task) => task.id === draggedId);
+      const targetId = row.dataset.ganttTaskRow;
+      if (!dragged || !targetId || draggedId === targetId || dragged.owner !== row.dataset.ganttOwner) return;
+      event.preventDefault();
+      const after = event.clientY >= row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      moveGanttQueueTask(draggedId, targetId, after);
+    });
+
+    row.addEventListener("dragend", () => {
+      suppressScheduleClickUntil = Date.now() + 250;
+      ganttDragTaskId = "";
+      els.scheduleView.querySelectorAll(".gantt-task-row").forEach((item) => item.classList.remove("dragging", "drop-before", "drop-after"));
+    });
+  });
+}
+
+function moveGanttQueueTask(taskId, targetId, after) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  const target = state.tasks.find((item) => item.id === targetId);
+  if (!task || !target || task.owner !== target.owner || !isCapacityIssue(task) || !isCapacityIssue(target)) return;
+  const queue = state.tasks
+    .filter((item) => item.owner === task.owner && isCapacityIssue(item))
+    .sort((a, b) => (a.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER));
+  const fromIndex = queue.findIndex((item) => item.id === taskId);
+  queue.splice(fromIndex, 1);
+  const targetIndex = queue.findIndex((item) => item.id === targetId);
+  queue.splice(targetIndex + (after ? 1 : 0), 0, task);
+  queue.forEach((item, index) => {
+    item.schedule = { ...normalizeTaskSchedule(item.schedule), queueOrder: index };
+  });
+  markStateMutation(`「${task.owner}」の Issue Queue をドラッグで変更`);
+  render();
 }
 
 function ganttDayClass(dateString) {
@@ -2673,7 +2739,7 @@ function openTaskDialog(id, overrides = {}) {
   els.taskNotes.value = overrides.notes || task?.notes || "";
   const schedule = normalizeTaskSchedule(overrides.schedule || task?.schedule);
   els.taskRemainingEffort.value = schedule.remainingEffortDays ?? "";
-  els.taskQueuePosition.value = Number.isFinite(schedule.queueOrder) ? String(schedule.queueOrder + 1) : "未設定";
+  els.taskQueuePosition.value = Number.isFinite(schedule.queueOrder) ? String(schedule.queueOrder + 1) : String(nextQueueOrder(els.taskOwner.value, task?.id) + 1);
   els.taskPlannedStart.value = schedule.plannedStart || "未計算";
   els.taskEta.value = schedule.eta || "未計算";
   els.taskOriginalEta.value = schedule.originalEta || "未計算";
@@ -2760,6 +2826,7 @@ function syncScheduleSection() {
   const isIssue = els.taskType.value === "issue";
   els.scheduleSection.hidden = !isIssue;
   els.taskRemainingEffort.disabled = !isIssue;
+  els.taskQueuePosition.disabled = !isIssue;
 }
 
 function previewTaskSchedule() {
@@ -2792,6 +2859,7 @@ function previewTaskSchedule() {
   const index = previewState.tasks.findIndex((item) => item.id === id);
   if (index >= 0) previewState.tasks[index] = previewTask;
   else previewState.tasks.push(previewTask);
+  applyQueuePosition(previewState, owner, id, els.taskQueuePosition.value);
   ensureScheduleMemberSettings(previewState);
   ensureQueueOrders(previewState);
   recalculateSchedules(previewState);
@@ -3158,6 +3226,8 @@ function saveTask(event) {
     markStateMutation(`「${task.title}」を追加`);
     state.tasks.unshift(task);
   }
+
+  if (type === "issue") applyQueuePosition(state, task.owner, task.id, els.taskQueuePosition.value);
 
   ensureScheduleMemberSettings(state);
   ensureQueueOrders(state);
@@ -4271,6 +4341,23 @@ function nextQueueOrder(owner, excludeId = "") {
     .map((task) => task.schedule?.queueOrder)
     .filter(Number.isFinite);
   return orders.length ? Math.max(...orders) + 1 : 0;
+}
+
+function applyQueuePosition(targetState, owner, taskId, value) {
+  const task = targetState.tasks.find((item) => item.id === taskId);
+  if (!task || !isCapacityIssue(task)) return;
+  const queue = targetState.tasks
+    .filter((item) => item.owner === owner && isCapacityIssue(item))
+    .sort((a, b) => (a.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER));
+  const currentIndex = queue.findIndex((item) => item.id === taskId);
+  if (currentIndex < 0) return;
+  const parsed = Number(value);
+  const requestedIndex = Number.isInteger(parsed) && parsed > 0 ? parsed - 1 : queue.length - 1;
+  queue.splice(currentIndex, 1);
+  queue.splice(Math.max(0, Math.min(requestedIndex, queue.length)), 0, task);
+  queue.forEach((item, index) => {
+    item.schedule = { ...normalizeTaskSchedule(item.schedule), queueOrder: index };
+  });
 }
 
 function scheduleForTaskSave(existingTask, owner, status, effortValue) {

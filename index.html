@@ -180,12 +180,12 @@
           <legend>スケジュール</legend>
           <div class="form-grid task-meta-grid">
             <label>残り工数（人日）<input id="taskRemainingEffort" type="number" min="0" step="0.5" inputmode="decimal" placeholder="例: 1.5"></label>
-            <label>Queue 順位<input id="taskQueuePosition" type="text" readonly></label>
+            <label>Queue 順位<input id="taskQueuePosition" type="number" min="1" step="1" inputmode="numeric" placeholder="例: 1"></label>
             <label>予定開始<input id="taskPlannedStart" type="text" readonly></label>
             <label>予定 MR（ETA）<input id="taskEta" type="text" readonly></label>
             <label>初回 ETA<input id="taskOriginalEta" type="text" readonly></label>
           </div>
-          <p class="dialog-description">工数は 0.5 人日単位です。入力中の予定日はプレビューで、保存時に確定します。ETA は調査・修正・テストを終えて MR に入る予定日です。</p>
+          <p class="dialog-description">工数は 0.5 人日単位です。Queue 順位は同じ担当者内の実行順です。入力中の予定日はプレビューで、保存時に確定します。ETA は調査・修正・テストを終えて MR に入る予定日です。</p>
         </fieldset>
         <fieldset id="qualityAnalysisSection" class="quality-section">
           <legend>品質分析</legend>
@@ -280,7 +280,7 @@
 
   <datalist id="projectList"></datalist>
   <datalist id="ownerList"></datalist>
-  <script src="app.js?v=20260924-queue-capacity-fix"></script>
+  <script src="app.js?v=20260927-gantt-drag-queue"></script>
 </body>
 
 </html>
