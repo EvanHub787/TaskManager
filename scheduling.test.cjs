@@ -12,6 +12,7 @@ const functions = names.map(name => {
 const context = vm.createContext({
   effortStepDays: 0.5,
   capacityStatuses: ['調査中', '修正中', 'テスト中'],
+  completedStatus: '完了',
   japaneseHolidayDates: new Set(['2026-09-21', '2026-09-22', '2026-09-23']),
   todayOffset: () => '2026-09-24',
   isDone: task => task.status === '完了',
@@ -19,13 +20,13 @@ const context = vm.createContext({
   render: () => {}
 });
 vm.runInContext(functions, context);
-function schedule(efforts, capacity = 1) {
+function schedule(efforts, capacity = 1, plannedStartOverrides = []) {
   const state = {
     members: ['我'],
     scheduling: { memberSettings: { '我': { dailyCapacityDays: capacity } } },
     tasks: efforts.map((effort, index) => ({
       id: String(index), type: 'issue', owner: '我', status: '修正中',
-      schedule: { remainingEffortDays: effort, queueOrder: index }
+      schedule: { remainingEffortDays: effort, queueOrder: index, plannedStartOverride: plannedStartOverrides[index] || '' }
     }))
   };
   context.recalculateSchedules(state);
@@ -34,15 +35,28 @@ function schedule(efforts, capacity = 1) {
 let result = schedule([2, 2, 1]);
 assert.deepEqual(result.map(s => [s.plannedStart, s.eta]), [
   ['2026-09-24', '2026-09-25'],
-  ['2026-09-28', '2026-09-29'],
-  ['2026-09-30', '2026-09-30']
+  ['2026-09-24', '2026-09-25'],
+  ['2026-09-24', '2026-09-24']
 ]);
 result = schedule([0.5, 0.5, 0.5]);
-assert.deepEqual(result.map(s => s.plannedStart), ['2026-09-24', '2026-09-24', '2026-09-25']);
+assert.deepEqual(result.map(s => s.plannedStart), ['2026-09-24', '2026-09-24', '2026-09-24']);
 result = schedule([1, 0.5], 0.5);
-assert.equal(result[1].plannedStart, '2026-09-28');
+assert.equal(result[1].plannedStart, '2026-09-24');
 assert.equal(schedule([2], 0)[0].calculationStatus, 'missing_capacity');
 assert.equal(schedule([null, 2])[1].plannedStart, '2026-09-24');
+result = schedule([1, 1], 1, ['', '2026-09-29']);
+assert.deepEqual(result.map(s => [s.plannedStart, s.eta]), [['2026-09-24', '2026-09-24'], ['2026-09-29', '2026-09-29']]);
+result = schedule([2, 1], 1, ['', '2026-09-24']);
+assert.equal(result[1].plannedStart, '2026-09-24');
+const mrState = {
+  members: ['我'],
+  scheduling: { memberSettings: { '我': { dailyCapacityDays: 1 } } },
+  tasks: [{ id: 'mr', type: 'issue', owner: '我', status: 'MR', schedule: { remainingEffortDays: 1, queueOrder: 0 } }]
+};
+context.recalculateSchedules(mrState);
+assert.equal(mrState.tasks[0].schedule.calculationStatus, 'scheduled');
+assert.equal(mrState.tasks[0].schedule.eta, '2026-09-24');
+assert.equal(context.isCapacityIssue(mrState.tasks[0]), true);
 const queueState = {
   members: ['我'],
   scheduling: { memberSettings: { '我': { dailyCapacityDays: 1 } } },

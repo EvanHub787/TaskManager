@@ -21,9 +21,15 @@ const stateStoreName = "state";
 const recoveryStoreName = "recovery";
 const maxUndoEntries = 30;
 const maxRecoveryPoints = 12;
-const capacityStatuses = ["調査中", "修正中", "テスト中"];
+const capacityStatuses = ["未完了の全 Issue ステータス"];
 const personDayHours = 8;
 const effortStepDays = 0.5;
+const ganttStatusTones = {
+  blue: { background: "#dce6ee", color: "#42677f", dot: "#668aa1" },
+  green: { background: "#dce8df", color: "#496b55", dot: "#6f9178" },
+  red: { background: "#eddede", color: "#8c5656", dot: "#b77a7a" },
+  default: { background: "#e5e9ec", color: "#5f6b73", dot: "#8a989f" }
+};
 const japaneseHolidayCoveredThrough = "2027-12-31";
 const japaneseHolidayDates = new Set([
   "2026-01-01", "2026-01-12", "2026-02-11", "2026-02-23", "2026-03-20", "2026-04-29",
@@ -266,6 +272,7 @@ function bindEvents() {
   });
   els.taskRemainingEffort.addEventListener("input", previewTaskSchedule);
   els.taskQueuePosition.addEventListener("input", previewTaskSchedule);
+  els.taskPlannedStart.addEventListener("input", previewTaskSchedule);
   els.taskOwner.addEventListener("input", previewTaskSchedule);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
@@ -979,35 +986,34 @@ function renderSchedule() {
   const rangeEnd = days[days.length - 1];
   const visibleIds = new Set(filteredTasks().map((task) => task.id));
   const groups = state.members.map((member) => {
-    const allQueue = state.tasks
-      .filter((task) => visibleIds.has(task.id) && task.owner === member && isCapacityIssue(task))
-      .sort((a, b) => (a.schedule?.queueOrder ?? 0) - (b.schedule?.queueOrder ?? 0));
-    const scheduled = allQueue.filter((task) => task.schedule?.plannedStart && task.schedule?.eta);
-    const missing = allQueue.filter((task) => !task.schedule?.plannedStart || !task.schedule?.eta);
-    return { member, scheduled, missing };
+    const allIssues = state.tasks
+      .filter((task) => visibleIds.has(task.id) && task.type === "issue" && task.owner === member)
+      .sort((a, b) => (a.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) || sortByBoardOrder(a, b));
+    const gantt = allIssues.filter((task) => {
+      const schedule = normalizeTaskSchedule(task.schedule);
+      return schedule.remainingEffortDays > 0
+        && schedule.plannedStart
+        && schedule.eta
+        && schedule.eta >= rangeStart
+        && schedule.plannedStart <= rangeEnd;
+    });
+    const displayOnly = allIssues.filter((task) => !gantt.includes(task));
+    return { member, gantt, displayOnly };
   });
-  const scheduledCount = groups.reduce((sum, group) => sum + group.scheduled.length, 0);
-  const missingCount = groups.reduce((sum, group) => sum + group.missing.length, 0);
+  const ganttCount = groups.reduce((sum, group) => sum + group.gantt.length, 0);
+  const displayOnlyCount = groups.reduce((sum, group) => sum + group.displayOnly.length, 0);
 
   els.scheduleView.innerHTML = `
     <div class="gantt-toolbar">
       <div>
         <strong>${escapeHtml(formatGanttRange(rangeStart, rangeEnd))}</strong>
-        <span>${scheduledCount} Issue${missingCount ? ` · 工数未設定 ${missingCount}` : ""}</span>
+        <span>${ganttCount} 件をガント表示${displayOnlyCount ? ` · 表示のみ ${displayOnlyCount}` : ""}</span>
       </div>
       <div class="gantt-actions">
         <button class="secondary-button" data-gantt-shift="-1" type="button">← 1週</button>
         <button class="secondary-button" data-gantt-today type="button">今週</button>
         <button class="secondary-button" data-gantt-shift="1" type="button">1週 →</button>
       </div>
-    </div>
-    <div class="gantt-legend">
-      <span><i class="gantt-legend-dot research"></i>調査中</span>
-      <span><i class="gantt-legend-dot fixing"></i>修正中</span>
-      <span><i class="gantt-legend-dot testing"></i>テスト中</span>
-      <span><i class="gantt-legend-dot risk"></i>期限超過見込み</span>
-      <span class="gantt-note">⠿ を上下にドラッグして Queue 順位を変更</span>
-      <span class="gantt-note">MR・完了・Todo は Capacity 対象外</span>
     </div>
     <div class="gantt-scroll">
       <div class="gantt-chart" style="--gantt-days:${dayCount}">
@@ -1053,17 +1059,35 @@ function ganttHeader(days) {
 }
 
 function ganttMemberGroup(group, days, rangeStart, rangeEnd) {
-  const rows = group.scheduled
-    .filter((task) => task.schedule.eta >= rangeStart && task.schedule.plannedStart <= rangeEnd)
-    .map((task) => ganttTaskRow(task, days, rangeStart, rangeEnd))
-    .join("");
-  const missingRows = group.missing.map((task) => ganttMissingTaskRow(task, days)).join("");
-  const missingText = group.missing.length ? `${group.missing.length} 件は未計算` : "";
+  const rows = group.gantt.map((task) => ganttTaskRow(task, days, rangeStart, rangeEnd)).join("");
+  const displayOnlyRows = group.displayOnly.map((task) => ganttDisplayOnlyTaskRow(task, days)).join("");
+  const displayOnlyText = group.displayOnly.length ? `${group.displayOnly.length} 件は表示のみ` : "";
   return `
     <div class="gantt-member-row">
-      <div class="gantt-member-label">${escapeHtml(group.member)}<span>${escapeHtml(missingText)}</span></div>
+      <div class="gantt-member-label">${escapeHtml(group.member)}<span>${escapeHtml(displayOnlyText)}</span></div>
     </div>
-    ${rows}${missingRows}${rows || missingRows ? "" : `<div class="gantt-row gantt-empty-row"><div class="gantt-label">この期間の予定なし</div>${ganttBackgroundCells(days)}</div>`}
+    ${rows}${displayOnlyRows}${rows || displayOnlyRows ? "" : `<div class="gantt-row gantt-empty-row"><div class="gantt-label">Issue はありません</div>${ganttBackgroundCells(days)}</div>`}
+  `;
+}
+
+function ganttDisplayOnlyTaskRow(task, days) {
+  const schedule = normalizeTaskSchedule(task.schedule);
+  const reason = schedule.remainingEffortDays === null
+    ? "工数未設定"
+    : schedule.remainingEffortDays <= 0
+      ? "工数 0 人日"
+      : !schedule.plannedStart || !schedule.eta
+        ? "スケジュール未計算"
+        : `表示期間外 · ${schedule.plannedStart} → ${schedule.eta}`;
+  return `
+    <div class="gantt-row gantt-display-only-row">
+      <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(task.status)}${schedule.remainingEffortDays === null ? "" : ` · ${formatPersonDays(schedule.remainingEffortDays)}`}</span>
+      </button>
+      ${ganttBackgroundCells(days)}
+      <button class="gantt-display-only-badge" data-gantt-task="${task.id}" type="button">${escapeHtml(reason)}</button>
+    </div>
   `;
 }
 
@@ -1092,23 +1116,45 @@ function ganttTaskRow(task, days, rangeStart, rangeEnd) {
   const startIndex = naturalDaysBetween(rangeStart, start);
   const span = Math.max(1, naturalDaysBetween(start, end) + 1);
   const risk = task.due && task.schedule.eta > task.due;
-  const statusClass = task.status === "調査中" ? "research" : task.status === "修正中" ? "fixing" : "testing";
+  const statusStyle = ganttStatusStyle(task.status);
   const clippedStart = task.schedule.plannedStart < rangeStart ? " clipped-start" : "";
   const clippedEnd = task.schedule.eta > rangeEnd ? " clipped-end" : "";
+  const canReorder = isCapacityIssue(task);
   return `
-    <div class="gantt-row gantt-task-row" data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}" draggable="true">
+    <div class="gantt-row${canReorder ? " gantt-task-row" : ""}" ${canReorder ? `data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}" draggable="true"` : ""}>
       <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
-        <strong><i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>${escapeHtml(task.title)}</strong>
-        <span>#${(task.schedule.queueOrder ?? 0) + 1} · ${formatPersonDays(task.schedule.remainingEffortDays)}</span>
+        <strong>${canReorder ? `<i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>` : ""}${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(task.status)} · ${formatPersonDays(task.schedule.remainingEffortDays)}</span>
       </button>
       ${ganttBackgroundCells(days)}
-      <button class="gantt-bar ${statusClass}${risk ? " risk" : ""}${clippedStart}${clippedEnd}" data-gantt-task="${task.id}" type="button"
-        style="grid-column:${startIndex + 2} / span ${span}"
+      <button class="gantt-bar${risk ? " risk" : ""}${clippedStart}${clippedEnd}" data-gantt-task="${task.id}" type="button"
+        style="${statusStyle}grid-column:${startIndex + 2} / span ${span}"
         title="${escapeHtml(`${task.title} | ${task.schedule.plannedStart} → ${task.schedule.eta} | 期限 ${task.due}`)}">
         <span>${escapeHtml(task.status)}</span><strong>${escapeHtml(task.schedule.eta)}</strong>
       </button>
     </div>
   `;
+}
+
+function ganttLegendItem(status) {
+  const tone = ganttStatusTone(status);
+  return `<span><i class="gantt-legend-dot" style="--gantt-status-dot:${tone.dot}"></i>${escapeHtml(status)}</span>`;
+}
+
+function ganttStatusStyle(status) {
+  const tone = ganttStatusTone(status);
+  return `--gantt-status-background:${tone.background};--gantt-status-color:${tone.color};`;
+}
+
+function ganttStatusTone(status) {
+  const standardTones = {
+    "調査中": ganttStatusTones.blue,
+    "修正中": ganttStatusTones.blue,
+    "MR": ganttStatusTones.blue,
+    "単結": ganttStatusTones.green,
+    "システムテスト": ganttStatusTones.red
+  };
+  return standardTones[status] || ganttStatusTones.default;
 }
 
 function ganttBackgroundCells(days) {
@@ -1277,7 +1323,7 @@ function renderPeople() {
 function scheduleMemberPanel(member, isSelf) {
   const summary = ownerScheduleSummary(member);
   const capacity = state.scheduling.memberSettings[member]?.dailyCapacityDays ?? 1;
-  const waitingMr = state.tasks.filter((task) => task.type === "issue" && task.owner === member && task.status === "MR").length;
+  const mrInQueue = state.tasks.filter((task) => isCapacityIssue(task) && task.owner === member && task.status === "MR").length;
   const rows = summary.queue.length
     ? summary.queue.map((task, index) => scheduleQueueRow(task, index, summary.queue.length)).join("")
     : `<div class="schedule-empty">スケジュール対象の Issue はありません</div>`;
@@ -1295,7 +1341,7 @@ function scheduleMemberPanel(member, isSelf) {
         <span><strong>${formatPersonDays(summary.totalEffort)}</strong>残り工数</span>
         <span><strong>${summary.queueEndDate || "—"}</strong>Queue 終了</span>
         <span><strong>${formatPersonDays(summary.weeklyRemaining)}</strong>今週残り</span>
-        <span><strong>${waitingMr}</strong>MR 待ち</span>
+        <span><strong>${mrInQueue}</strong>MR 対応</span>
       </div>
       ${summary.missingEffort ? `<div class="schedule-warning">${summary.missingEffort} 件の工数が未設定です</div>` : ""}
       <div class="schedule-queue">${rows}</div>
@@ -1660,7 +1706,6 @@ function taskCard(task, enableDrag = false) {
 
 function scheduleBadge(task) {
   const schedule = normalizeTaskSchedule(task.schedule);
-  if (task.status === "MR") return `<span class="tag schedule-tag waiting">MR 待ち</span>`;
   if (!isCapacityStatus(task.status)) return "";
   if (schedule.remainingEffortDays === null) return `<span class="tag schedule-tag missing">工数未設定</span>`;
   const riskClass = schedule.eta && task.due && schedule.eta > task.due ? " risk" : "";
@@ -2740,7 +2785,9 @@ function openTaskDialog(id, overrides = {}) {
   const schedule = normalizeTaskSchedule(overrides.schedule || task?.schedule);
   els.taskRemainingEffort.value = schedule.remainingEffortDays ?? "";
   els.taskQueuePosition.value = Number.isFinite(schedule.queueOrder) ? String(schedule.queueOrder + 1) : String(nextQueueOrder(els.taskOwner.value, task?.id) + 1);
-  els.taskPlannedStart.value = schedule.plannedStart || "未計算";
+  els.taskPlannedStart.value = schedule.plannedStartOverride || schedule.plannedStart || "";
+  els.taskPlannedStart.dataset.calculatedStart = schedule.plannedStart || "";
+  els.taskPlannedStart.dataset.overrideStart = schedule.plannedStartOverride || "";
   els.taskEta.value = schedule.eta || "未計算";
   els.taskOriginalEta.value = schedule.originalEta || "未計算";
   fillQualityForm(type === "issue" ? normalizeIssueQuality(overrides.quality || task?.quality) : defaultIssueQuality());
@@ -2827,6 +2874,7 @@ function syncScheduleSection() {
   els.scheduleSection.hidden = !isIssue;
   els.taskRemainingEffort.disabled = !isIssue;
   els.taskQueuePosition.disabled = !isIssue;
+  els.taskPlannedStart.disabled = !isIssue;
 }
 
 function previewTaskSchedule() {
@@ -2854,7 +2902,7 @@ function previewTaskSchedule() {
     type: "issue",
     owner,
     status: els.taskStatus.value,
-    schedule: scheduleForTaskSave(existingTask, owner, els.taskStatus.value, effort)
+    schedule: scheduleForTaskSave(existingTask, owner, els.taskStatus.value, effort, plannedStartOverrideForInput(existingTask))
   };
   const index = previewState.tasks.findIndex((item) => item.id === id);
   if (index >= 0) previewState.tasks[index] = previewTask;
@@ -2864,8 +2912,15 @@ function previewTaskSchedule() {
   ensureQueueOrders(previewState);
   recalculateSchedules(previewState);
   const calculated = previewState.tasks.find((item) => item.id === id)?.schedule;
-  els.taskPlannedStart.value = calculated?.plannedStart || (calculated?.calculationStatus === "missing_capacity" ? "Capacity未設定" : "未計算");
   els.taskEta.value = calculated?.eta || (calculated?.calculationStatus === "missing_capacity" ? "Capacity未設定" : "未計算");
+}
+
+function plannedStartOverrideForInput(existingTask) {
+  const value = els.taskPlannedStart.value;
+  if (!value) return "";
+  const existingOverride = normalizeTaskSchedule(existingTask?.schedule).plannedStartOverride;
+  if (existingOverride) return value;
+  return value === els.taskPlannedStart.dataset.calculatedStart ? "" : value;
 }
 
 function defaultIssueQuality() {
@@ -3189,7 +3244,7 @@ function saveTask(event) {
   const title = taskTitleValueForSave(type, existingTask);
   const quality = type === "issue" ? readQualityForm() : null;
   const schedule = type === "issue"
-    ? scheduleForTaskSave(existingTask, els.taskOwner.value, status, els.taskRemainingEffort.value)
+    ? scheduleForTaskSave(existingTask, els.taskOwner.value, status, els.taskRemainingEffort.value, plannedStartOverrideForInput(existingTask))
     : null;
 
   const task = {
@@ -4184,6 +4239,7 @@ function normalizeTaskSchedule(value = {}, fallbackOrder = null) {
   return {
     remainingEffortDays: normalizeEffortDays(raw.remainingEffortDays),
     queueOrder: Number.isFinite(raw.queueOrder) ? raw.queueOrder : (Number.isFinite(fallbackOrder) ? fallbackOrder : null),
+    plannedStartOverride: /^\d{4}-\d{2}-\d{2}$/.test(raw.plannedStartOverride || "") ? raw.plannedStartOverride : "",
     plannedStart: raw.plannedStart || "",
     eta: raw.eta || "",
     originalEta: raw.originalEta || "",
@@ -4210,7 +4266,7 @@ function ensureScheduleMemberSettings(targetState) {
 }
 
 function isCapacityStatus(status) {
-  return capacityStatuses.includes(status);
+  return Boolean(String(status || "").trim()) && status !== completedStatus;
 }
 
 function isCapacityIssue(task) {
@@ -4239,7 +4295,6 @@ function recalculateSchedules(targetState) {
     if (task.type !== "issue") return;
     const schedule = normalizeTaskSchedule(task.schedule);
     if (isDone(task)) task.schedule = scheduleWithStatus(schedule, "completed", schedule.plannedStart, schedule.eta, now);
-    else if (task.status === "MR") task.schedule = scheduleWithStatus(schedule, "waiting_mr", schedule.plannedStart, schedule.eta, now);
     else if (!memberSet.has(task.owner)) task.schedule = scheduleWithStatus(schedule, "external_owner", "", "", now);
   });
 
@@ -4247,20 +4302,17 @@ function recalculateSchedules(targetState) {
     const queue = targetState.tasks
       .filter((task) => task.owner === member && isCapacityIssue(task))
       .sort((a, b) => (a.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER));
-    let cursor = nextDateWithCapacity(targetState, member, todayOffset(0), true);
-    let available = cursor ? capacityForDate(targetState, member, cursor) : 0;
-
     queue.forEach((task, index) => {
       const schedule = { ...normalizeTaskSchedule(task.schedule), queueOrder: index };
       if (schedule.remainingEffortDays === null) {
         task.schedule = scheduleWithStatus(schedule, "missing_effort", "", "", now);
         return;
       }
-      // The preceding issue may have exhausted this day, not the member's future capacity.
-      if (cursor && available <= 0) {
-        cursor = nextDateWithCapacity(targetState, member, addCalendarDays(cursor, 1), true);
-        available = cursor ? capacityForDate(targetState, member, cursor) : 0;
-      }
+      const requestedStart = schedule.plannedStartOverride && schedule.plannedStartOverride > todayOffset(0)
+        ? schedule.plannedStartOverride
+        : todayOffset(0);
+      let cursor = nextDateWithCapacity(targetState, member, requestedStart, true);
+      let available = cursor ? capacityForDate(targetState, member, cursor) : 0;
       if (!cursor || available <= 0) {
         task.schedule = scheduleWithStatus(schedule, "missing_capacity", "", "", now);
         return;
@@ -4360,13 +4412,14 @@ function applyQueuePosition(targetState, owner, taskId, value) {
   });
 }
 
-function scheduleForTaskSave(existingTask, owner, status, effortValue) {
+function scheduleForTaskSave(existingTask, owner, status, effortValue, plannedStartOverride = "") {
   const existing = normalizeTaskSchedule(existingTask?.schedule);
   const entersCapacity = isCapacityStatus(status) && (!existingTask || !isCapacityStatus(existingTask.status));
   const ownerChanged = Boolean(existingTask && existingTask.owner !== owner);
   return {
     ...existing,
     remainingEffortDays: normalizeEffortDays(effortValue),
+    plannedStartOverride,
     queueOrder: entersCapacity || ownerChanged || !Number.isFinite(existing.queueOrder)
       ? nextQueueOrder(owner, existingTask?.id)
       : existing.queueOrder

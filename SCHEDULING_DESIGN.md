@@ -9,11 +9,11 @@
 - 保留 `task.order` 作为看板流程列内顺序。
 - 新增 `task.schedule.queueOrder` 作为负责人队列顺序，两者互不覆盖。
 - 保留 `task.due` 作为人工承诺期限/目标期限。
-- 新增 `plannedStart` 与 `eta` 作为系统计算结果，不覆盖 `due`。
+- 新增 `plannedStart` 与 `eta` 作为系统计算结果，不覆盖 `due`；`plannedStartOverride` 可作为人工指定的最早开始日。
 - 人员仍沿用现有的字符串名称，第一阶段用 `state.scheduling.memberSettings` 按成员名保存 Capacity，避免立即把大量代码改成 member ID。
 - 只有未完成 Issue 进入 Capacity 排程；Todo 已确认不纳入 Capacity，也不参与负责人排程队列。
 - 工数单位确定为人日，最小输入单位为 0.5 人日；1 人日按 8 小时定义，但第一阶段界面和计算不拆成小时。
-- `調査中`、`修正中`、`テスト中` 占 Capacity；`MR` 不占 Capacity，也不阻挡负责人继续处理队列中的下一项。
+- 所有未完成 Issue 阶段都占 Capacity（包括 `MR`）；只有完了 Issue 与 Todo 不占 Capacity。
 - 工作日按周一至周五并排除日本国民祝日、振替休日和法定“休日”。
 - 没有剩余工数的旧 Issue 显示为“待估算”，不使用隐含默认工数，也不阻塞后续已估算 Issue 的计算；界面必须显著提示队列结果不完整。
 - 每次排期变化由一个集中、永久保存的排期事件记录，现有本地“操作履历”只能作为撤销辅助，不能代替 ETA 审计记录。
@@ -94,7 +94,7 @@
     unit: "person_days",
     hoursPerPersonDay: 8,
     effortStepDays: 0.5,
-    capacityStatuses: ["調査中", "修正中", "テスト中"],
+    capacityStatuses: ["未完了の全 Issue ステータス"],
     workweek: [1, 2, 3, 4, 5],
     holidayCalendar: {
       region: "JP",
@@ -122,7 +122,7 @@
 - 工数和 Capacity 都以人日计算，最小粒度为 0.5 人日。1 人日定义为 8 小时，只用于团队理解和将来数据交换；第一阶段不提供小时输入。
 - `dailyCapacityDays` 表示成员每天可以投入 Issue 的有效人日，建议界面先提供 0、0.5、1.0 三档。例如每日 Capacity 为 0.5 人日时，一个 1 人日 Issue 需要两个工作日。
 - `capacityOverrides` 支持请假、会议日、临时半天等，以人日填写。
-- `capacityStatuses` 固定为现有流程中的 `調査中`、`修正中`、`テスト中`。`MR` 排除在外。
+- `capacityStatuses` 覆盖所有未完成的 Issue workflow 状态，包括 `MR`；完了与 Todo 排除在外。
 - `workweek` 为周一至周五。
 - `holidayCalendar` 使用日本内阁府公布的国民祝日数据，必须包括振替休日和祝日法第 3 条第 3 项产生的“休日”。内阁府当前页面公布到 2027 年，并说明 2028 年数据将在 2027 年 2 月发布，因此应用应内置已公布日期、每年更新，并在 ETA 超出 `coveredThrough` 时明确提示“日本假期数据尚未发布/更新”。
 - `additionalNonWorkingDates` 只用于公司统一休业日等日本法定假日以外的日期，不用来手工重复维护日本祝日。
@@ -149,10 +149,10 @@ schedule: {
 
 - `remainingEffortDays`：用户维护的剩余工数；必须大于等于 0，且只能以 0.5 人日递增。0 表示已无剩余工作，但仍处于占 Capacity 状态时应提示确认。
 - `queueOrder`：同一 owner 的未完成 Issue 串行顺序。建议保存为连续整数 0..n-1；每次负责人变更或拖拽后只重排涉及的负责人。
-- `plannedStart` / `eta`：纯算法输出，不在普通编辑表单中允许直接覆盖。由于 `MR` 不占 Capacity，这里的 ETA 定义为“负责人完成需要投入 Capacity 的工作、预计进入 MR 的日期”，不预测 MR 等待评审后最终关闭的日期。
+- `plannedStartOverride`：用户可维护的最早开始日。算法会在该日期、前序 Queue 完成日与可用 Capacity 三者满足后安排实际 `plannedStart`。`plannedStart` / `eta` 均由算法输出；ETA 定义为该 Issue 当前所处及后续本团队阶段所需工数完成的预计日期。
 - `originalEta`：Issue 第一次成功进入排程时写入，之后永不自动修改；旧 Issue 在升级后的首次有效计算时初始化。
 - `calculatedAt`：最近一次计算时间，仅用于解释数据新鲜度。
-- `calculationStatus` 建议值：`scheduled`、`missing_effort`、`missing_capacity`、`waiting_mr`、`completed`、`external_owner`。Issue 进入 `MR` 时标记为 `waiting_mr`，退出负责人队列，并保留进入 MR 前最后一次计划快照供追溯。
+- `calculationStatus` 建议值：`scheduled`、`missing_effort`、`missing_capacity`、`completed`、`external_owner`。Issue 进入 `MR` 后继续留在负责人队列并消耗 Capacity。
 
 不要把这些字段平铺到 task 顶层：嵌套结构可减少与现有 Issue/Todo 字段冲突，也方便 `migrateState` 为旧数据统一补齐。
 
@@ -263,7 +263,7 @@ function calculateOwnerSchedule(owner, anchorDate, issues, settings) {
 - 负责人不在 `state.members`：标记 `external_owner`，不排程；现有成员页已把这种情况作为“团队外担当”展示。
 - 成员没有 Capacity 或 Capacity <= 0：标记 `missing_capacity`，不生成 ETA。
 - 已完成 Issue：标记 `completed`；保留 `originalEta` 与历史，当前 `plannedStart/eta` 可保留为最后计划快照，界面不再当作未来负荷。
-- `MR` Issue：标记 `waiting_mr`，不消耗 Capacity、不阻挡后续队列；保留最后一次 ETA。若从 MR 返回 `調査中/修正中/テスト中`，由用户选择重新插入队列的位置并触发重算。
+- `MR` Issue：继续消耗 Capacity，并与其他未完成阶段一起按 Queue 顺序排期。若从 MR 返回其他未完成阶段，保持 Queue 顺序并重算。
 
 未估算 Issue 是否阻塞其后任务存在业务歧义。建议第一阶段“不阻塞但显示全队列 ETA 不完整”，这样不会因任意默认值产生虚假的延期；如果团队希望保守排期，可在后续增加“未知工数阻塞后续”的设置。
 
@@ -294,8 +294,8 @@ function calculateOwnerSchedule(owner, anchorDate, issues, settings) {
 | Issue 完了/重新打开 | 当前负责人 |
 | 成员 Capacity 变化 | 该成员全队列 |
 | 日本假期数据或团队追加休业日变化 | 全部成员 |
-| workflow 在 `調査中/修正中/テスト中` 之间变化 | 不重算 |
-| Issue 进入或离开 `MR` / `完了` | 当前负责人；进入时释放 Capacity，离开时重新进入队列 |
+| workflow 在未完成阶段之间变化 | 不重算 |
+| Issue 进入或离开 `完了` | 当前负责人；进入时释放 Capacity，重新打开时重新进入队列 |
 | `due`、标题、案件、下一行动变化 | 不重算 |
 | 优先级变化 | 默认不重算；只有用户选择重排时才重算 |
 
@@ -358,7 +358,7 @@ simulateInsertion({ issueId, candidateOwner, insertIndex, remainingEffortDays })
 
 不建议把负责人队列直接塞进现有 workflow 看板列，因为一个是“流程状态维度”，一个是“人员执行顺序维度”，混在一次拖拽中会产生歧义。
 
-成员页之外，第一版已增加独立的“スケジュール”甘特图视图：默认展示从本周开始的 6 周，按成员分组，以 Planned Start 到 ETA 绘制任务条；周末、日本祝日和当天分别着色，并支持按周前后移动。任务条按 `調査中`、`修正中`、`テスト中` 区分颜色，ETA 晚于 due 时标红。工数未设置的 Issue 以“工数を設定”占位行显示，可直接打开 Issue 编辑弹窗。MR、完了和 Todo 不绘制 Capacity 任务条。
+成员页之外，第一版已增加独立的“スケジュール”甘特图视图：默认展示从本周开始的 6 周，按成员分组，以 Planned Start 到 ETA 绘制任务条；周末、日本祝日和当天分别着色，并支持按周前后移动。工数大于 0 且日期落在显示区间内的 Issue 绘制任务条；工数未设置、为 0 或不在显示区间的 Issue 以“表示のみ”行显示，可直接打开 Issue 编辑弹窗。Todo 不绘制 Capacity 任务条。
 
 ### 7.2 Issue 编辑弹窗
 
@@ -427,7 +427,7 @@ simulateInsertion({ issueId, candidateOwner, insertIndex, remainingEffortDays })
 
 ### 8.3 看板拖拽
 
-当前 `moveIssueTask` 会按目标 workflow 状态重新写 `order`。保持此逻辑；不要在此函数中顺便改 `queueOrder`。只有任务进入/离开占 Capacity 状态集合时调用排程服务：`調査中/修正中/テスト中` 互相切换不影响排程；进入 `MR` 或 `完了` 时释放 Capacity；从 `MR` 或 `完了` 返回时重新纳入队列。
+当前 `moveIssueTask` 会按目标 workflow 状态重新写 `order`。保持此逻辑；不要在此函数中顺便改 `queueOrder`。所有未完成 Issue 状态都属于 Capacity 集合，因此未完成阶段之间切换不影响 Queue；进入完了时释放 Capacity，从完了返回时重新纳入队列。
 
 ### 8.4 成员改名与合并
 
@@ -510,7 +510,7 @@ simulateInsertion({ issueId, candidateOwner, insertIndex, remainingEffortDays })
 7. 缺工数 Issue 显示待估算，不产生虚假 ETA。
 8. Capacity 缺失/为 0 时不死循环，返回 `missing_capacity`。
 9. 修改人工 due 不重算 ETA；ETA 晚于 due 时正确显示风险。
-10. `調査中/修正中/テスト中` 之间切换不改变 Queue Order；进入 `MR` 或完了时释放后续 Capacity。
+10. 未完成阶段之间切换不改变 Queue Order；仅进入完了时释放后续 Capacity。
 11. 自动重算不刷新业务 `updatedAt`，不消除停滞标记。
 12. Original ETA 只初始化一次，后续插单/工数/Capacity 改动不覆盖。
 13. 模拟不改变 state，正式应用结果与模拟一致。
