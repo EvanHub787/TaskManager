@@ -358,6 +358,28 @@
   color: var(--accent);
 }
 
+.gantt-task-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gantt-task-title {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gantt-task-heading .issue-number {
+  flex: 0 0 auto;
+}
+
 .gantt-drag-handle {
   display: inline-block;
   width: 16px;
@@ -368,8 +390,31 @@
   touch-action: none;
 }
 
+.gantt-drag-handle:active {
+  cursor: grabbing;
+}
+
 .gantt-task-row.dragging {
-  opacity: .42;
+  position: relative;
+  z-index: 20;
+  isolation: isolate;
+  transform: translateY(var(--gantt-drag-y, 0));
+  opacity: .96;
+  box-shadow: 0 8px 20px rgba(27, 42, 35, .18);
+  cursor: grabbing;
+  will-change: transform;
+}
+
+.gantt-task-row.dragging .gantt-label,
+.gantt-task-row.dragging .gantt-bar {
+  z-index: 21;
+}
+
+.gantt-task-row.queue-shifting {
+  position: relative;
+  z-index: 2;
+  transform: translateY(var(--gantt-queue-shift, 0));
+  transition: transform 140ms ease;
 }
 
 .gantt-task-row.drop-before {
@@ -467,6 +512,7 @@
 }
 
 .gantt-bar {
+  position: relative;
   z-index: 3;
   align-self: center;
   display: flex;
@@ -486,6 +532,34 @@
   font-size: 10px;
   white-space: nowrap;
   cursor: pointer;
+  touch-action: none;
+}
+
+.gantt-bar.is-date-dragging {
+  overflow: visible;
+  cursor: grabbing;
+  opacity: .88;
+}
+
+.gantt-drag-date {
+  display: none;
+}
+
+.gantt-bar.is-date-dragging .gantt-drag-date {
+  position: absolute;
+  top: -25px;
+  left: 50%;
+  display: block;
+  transform: translateX(-50%);
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, .2);
 }
 
 .gantt-bar.risk {
@@ -1725,6 +1799,8 @@ textarea {
 
 .cards {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 10px;
   min-height: 72px;
   border-radius: 8px;
@@ -1736,6 +1812,9 @@ textarea {
 }
 
 .task-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   border: 1px solid var(--line);
   border-left: 4px solid var(--accent);
   border-radius: 8px;
@@ -1853,6 +1932,47 @@ textarea {
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 12px 28px rgba(27, 42, 35, .14);
+}
+
+.dialog-picker {
+  position: relative;
+}
+
+.dialog-picker-button {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dialog-picker-button::after {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  content: "▾";
+  transform: translateY(-50%);
+  color: var(--muted);
+}
+
+.dialog-picker-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(27, 42, 35, .16);
 }
 
 .quick-field-wrap {
@@ -1983,7 +2103,9 @@ textarea {
 
 .task-title-button {
   appearance: none;
+  min-width: 0;
   max-width: 100%;
+  overflow-wrap: anywhere;
   min-height: auto;
   padding: 0;
   border: 0;
@@ -2128,19 +2250,27 @@ textarea {
   font-size: 12px;
 }
 
-.tag.high {
+.tag.rank-s {
   background: #ffe9e3;
   color: #9f341f;
 }
 
-.tag.middle {
+.tag.rank-a {
   background: #fff4d6;
   color: #815b00;
 }
 
-.tag.low {
+.tag.rank-b,
+.tag.rank-c {
   background: #e7f2ff;
   color: #1d5b88;
+}
+
+.tag.rank-d,
+.tag.rank-e,
+.tag.rank-none {
+  background: #eef2f0;
+  color: #64748b;
 }
 
 .priority-button {

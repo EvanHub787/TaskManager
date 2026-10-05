@@ -2,7 +2,8 @@ const defaultWorkflow = ["調査中", "修正中", "テスト中", "MR"];
 const completedStatus = "完了";
 const todoOpenStatus = "未対応";
 const todoDoneStatus = "完了";
-const priorities = ["高", "中", "低"];
+const priorities = ["なし", "S", "A", "B", "C", "D", "E"];
+const legacyRankMap = { "高": "A", "中": "C", "低": "E" };
 const defaultMembers = ["自分", "メンバーA", "メンバーB", "メンバーC", "メンバーD", "メンバーE"];
 const qualityRouteTypes = ["正常系", "異常系", "境界条件"];
 const qualityScopes = ["単機能", "機能間連携", "システム全体"];
@@ -102,7 +103,8 @@ let lastManualTaskTitleValue = "";
 let taskDialogDraft = null;
 let ganttWeekOffset = 0;
 let suppressScheduleClickUntil = 0;
-let ganttDragTaskId = "";
+let taskDialogBackdropPointerId = null;
+let taskDialogPickerOpen = "";
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -135,14 +137,19 @@ const els = {
   dialogTitle: document.querySelector("#dialogTitle"),
   taskId: document.querySelector("#taskId"),
   taskType: document.querySelector("#taskType"),
+  taskTypePicker: document.querySelector("#taskTypePicker"),
   taskTitle: document.querySelector("#taskTitle"),
   taskProject: document.querySelector("#taskProject"),
+  taskProjectPicker: document.querySelector("#taskProjectPicker"),
   taskOwner: document.querySelector("#taskOwner"),
+  taskOwnerPicker: document.querySelector("#taskOwnerPicker"),
   taskDue: document.querySelector("#taskDue"),
   taskStatus: document.querySelector("#taskStatus"),
+  taskStatusPicker: document.querySelector("#taskStatusPicker"),
   taskCompletedAtLabel: document.querySelector("#taskCompletedAtLabel"),
   taskCompletedAt: document.querySelector("#taskCompletedAt"),
   taskPriority: document.querySelector("#taskPriority"),
+  taskPriorityPicker: document.querySelector("#taskPriorityPicker"),
   taskRecurrenceLabel: document.querySelector("#taskRecurrenceLabel"),
   taskRecurrence: document.querySelector("#taskRecurrence"),
   taskLinkedIssueId: document.querySelector("#taskLinkedIssueId"),
@@ -153,11 +160,17 @@ const els = {
   taskNotes: document.querySelector("#taskNotes"),
   qualityAnalysisSection: document.querySelector("#qualityAnalysisSection"),
   qualityAnalysisStatus: document.querySelector("#qualityAnalysisStatus"),
+  qualityAnalysisStatusPicker: document.querySelector("#qualityAnalysisStatusPicker"),
   qualityRouteType: document.querySelector("#qualityRouteType"),
+  qualityRouteTypePicker: document.querySelector("#qualityRouteTypePicker"),
   qualityScope: document.querySelector("#qualityScope"),
+  qualityScopePicker: document.querySelector("#qualityScopePicker"),
   qualityReproducibility: document.querySelector("#qualityReproducibility"),
+  qualityReproducibilityPicker: document.querySelector("#qualityReproducibilityPicker"),
   qualityExternalDependency: document.querySelector("#qualityExternalDependency"),
+  qualityExternalDependencyPicker: document.querySelector("#qualityExternalDependencyPicker"),
   qualityDiscoveryPhase: document.querySelector("#qualityDiscoveryPhase"),
+  qualityDiscoveryPhasePicker: document.querySelector("#qualityDiscoveryPhasePicker"),
   scheduleSection: document.querySelector("#scheduleSection"),
   taskRemainingEffort: document.querySelector("#taskRemainingEffort"),
   taskQueuePosition: document.querySelector("#taskQueuePosition"),
@@ -227,7 +240,15 @@ function bindEvents() {
   els.saveDataFileBtn.addEventListener("click", saveDataFile);
   els.closeDialog.addEventListener("click", () => { taskDialogDraft = null; closeTaskDialog(); });
   els.cancelDialog.addEventListener("click", () => { taskDialogDraft = null; closeTaskDialog(); });
-  els.dialog.addEventListener("click", (event) => { if (event.target === els.dialog) saveDraftAndClose(); });
+  els.dialog.addEventListener("pointerdown", (event) => {
+    taskDialogBackdropPointerId = event.target === els.dialog ? event.pointerId : null;
+  });
+  els.dialog.addEventListener("pointerup", (event) => {
+    const closeFromBackdrop = taskDialogBackdropPointerId === event.pointerId && event.target === els.dialog;
+    taskDialogBackdropPointerId = null;
+    if (closeFromBackdrop) saveDraftAndClose();
+  });
+  els.dialog.addEventListener("pointercancel", () => { taskDialogBackdropPointerId = null; });
   els.dialog.addEventListener("cancel", (event) => { event.preventDefault(); saveDraftAndClose(); });
   els.deleteTaskBtn.addEventListener("click", deleteCurrentTask);
   els.createTodoFromIssueBtn.addEventListener("click", createTodoFromCurrentIssue);
@@ -254,26 +275,11 @@ function bindEvents() {
   els.taskAttachmentList.addEventListener("click", openTaskAttachmentPreview);
   els.closeImagePreview.addEventListener("click", closeTaskAttachmentPreview);
   els.imagePreviewDialog.addEventListener("click", closeTaskAttachmentPreviewFromBackdrop);
-  els.taskType.addEventListener("change", () => {
-    if (!els.taskId.value) els.taskDue.value = defaultDueForType(els.taskType.value);
-    if (els.taskType.value === "todo") clearAutoFilledIssueTitle();
-    fillStatusSelect(els.taskType.value);
-    syncIssueLinkRequirement();
-    syncCompletedAtField();
-    syncTaskNextLabel();
-    syncRecurrenceField();
-    syncQualityAnalysisSection();
-    syncScheduleSection();
-    previewTaskSchedule();
-  });
-  els.taskStatus.addEventListener("change", () => {
-    syncCompletedAtField();
-    previewTaskSchedule();
-  });
+  els.dialog.addEventListener("click", handleTaskDialogPickerClick);
+  els.dialog.addEventListener("keydown", handleTaskDialogPickerKeydown);
   els.taskRemainingEffort.addEventListener("input", previewTaskSchedule);
   els.taskQueuePosition.addEventListener("input", previewTaskSchedule);
   els.taskPlannedStart.addEventListener("input", previewTaskSchedule);
-  els.taskOwner.addEventListener("input", previewTaskSchedule);
   els.form.addEventListener("keydown", submitTaskDialogWithShortcut);
   els.form.addEventListener("submit", saveTask);
   els.boardView.addEventListener("click", suppressBoardClickAfterDrag, true);
@@ -291,15 +297,7 @@ function bindEvents() {
 }
 
 function fillStaticSelects() {
-  els.taskType.innerHTML = `<option value="issue">Issue</option><option value="todo">Todo</option>`;
-  els.taskPriority.innerHTML = priorities.map((priority) => `<option value="${priority}">${priority}</option>`).join("");
   els.taskRecurrence.innerHTML = `<option value="">なし</option><option value="daily">毎日</option>`;
-  fillSelect(els.qualityAnalysisStatus, qualityAnalysisStatusOptions, false);
-  fillSelect(els.qualityRouteType, qualityRouteTypes, true);
-  fillSelect(els.qualityScope, qualityScopes, true);
-  fillSelect(els.qualityReproducibility, qualityReproducibility, true);
-  fillSelect(els.qualityExternalDependency, qualityExternalDependencies, true);
-  fillSelect(els.qualityDiscoveryPhase, qualityDiscoveryPhases, true);
   fillStatusSelect("issue");
 }
 
@@ -309,8 +307,8 @@ function fillSelect(select, options, includeBlank = false) {
 
 function fillStatusSelect(type, selected) {
   const options = type === "todo" ? [todoOpenStatus, todoDoneStatus] : [...state.workflow, completedStatus];
-  els.taskStatus.innerHTML = options.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join("");
   els.taskStatus.value = selected && options.includes(selected) ? selected : options[0];
+  renderTaskDialogPickers();
 }
 
 function render() {
@@ -953,7 +951,7 @@ function renderProjects() {
     const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
     const issues = tasks.filter((task) => task.type === "issue" && !isDone(task)).length;
     const todos = tasks.filter((task) => task.type === "todo" && !isDone(task)).length;
-    const high = tasks.filter((task) => task.priority === "高" && !isDone(task)).length;
+    const high = tasks.filter((task) => isHighRank(task) && !isDone(task)).length;
     const overdue = tasks.filter((task) => !isDone(task) && daysUntil(task.due) < 0).length;
     return `
       <tr>
@@ -971,7 +969,7 @@ function renderProjects() {
   }).join("");
 
   els.projectsView.innerHTML = rows
-    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>未完了</th><th>Issue</th><th>Todo</th><th>高優先度</th><th>期限超過</th><th>完了率</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table class="list-table"><thead><tr><th>案件</th><th>件数</th><th>未完了</th><th>Issue</th><th>Todo</th><th>S・A Rank</th><th>期限超過</th><th>完了率</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
     : emptyState("案件はありません");
   wireTaskButtons(els.projectsView);
   els.projectsView.querySelectorAll("[data-project-detail]").forEach((button) => {
@@ -1016,7 +1014,7 @@ function renderSchedule() {
       </div>
     </div>
     <div class="gantt-scroll">
-      <div class="gantt-chart" style="--gantt-days:${dayCount}">
+      <div class="gantt-chart" data-gantt-range-start="${rangeStart}" style="--gantt-days:${dayCount}">
         ${ganttHeader(days)}
         ${groups.map((group) => ganttMemberGroup(group, days, rangeStart, rangeEnd)).join("")}
       </div>
@@ -1034,7 +1032,14 @@ function renderSchedule() {
     renderSchedule();
   });
   els.scheduleView.querySelectorAll("[data-gantt-task]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      const task = state.tasks.find((item) => item.id === button.dataset.ganttTask);
+      const issueUrl = taskIssueReferences(task || {}).find((reference) => reference.url)?.url;
+      if ((event.ctrlKey || event.metaKey) && issueUrl) {
+        event.preventDefault();
+        window.open(issueUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
       if (Date.now() > suppressScheduleClickUntil) openTaskDialog(button.dataset.ganttTask);
     });
   });
@@ -1078,13 +1083,13 @@ function ganttDisplayOnlyTaskRow(task, days) {
       ? "工数 0 人日"
       : !schedule.plannedStart || !schedule.eta
         ? "スケジュール未計算"
-        : `表示期間外 · ${schedule.plannedStart} → ${schedule.eta}`;
+        : `${formatGanttCompactDate(schedule.plannedStart)} → ${formatGanttCompactDate(schedule.eta)}`;
   return `
     <div class="gantt-row gantt-display-only-row">
-      <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
-        <strong>${escapeHtml(task.title)}</strong>
+      <div class="gantt-label gantt-task-label" title="${escapeHtml(task.title)}">
+        <div class="gantt-task-heading">${ganttIssueLinks(task)}<button class="gantt-task-title" data-gantt-task="${task.id}" type="button"><strong>${escapeHtml(task.title)}</strong></button></div>
         <span>${escapeHtml(task.status)}${schedule.remainingEffortDays === null ? "" : ` · ${formatPersonDays(schedule.remainingEffortDays)}`}</span>
-      </button>
+      </div>
       ${ganttBackgroundCells(days)}
       <button class="gantt-display-only-badge" data-gantt-task="${task.id}" type="button">${escapeHtml(reason)}</button>
     </div>
@@ -1099,11 +1104,11 @@ function ganttMissingTaskRow(task, days) {
       ? "Capacityを設定"
       : "スケジュール未計算";
   return `
-    <div class="gantt-row gantt-task-row gantt-unscheduled-row" data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}" draggable="true">
-      <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
-        <strong><i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>${escapeHtml(task.title)}</strong>
+    <div class="gantt-row gantt-task-row gantt-unscheduled-row" data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}">
+      <div class="gantt-label gantt-task-label" title="${escapeHtml(task.title)}">
+        <div class="gantt-task-heading"><i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>${ganttIssueLinks(task)}<button class="gantt-task-title" data-gantt-task="${task.id}" type="button"><strong>${escapeHtml(task.title)}</strong></button></div>
         <span>#${(task.schedule?.queueOrder ?? 0) + 1} · ${escapeHtml(task.status)}</span>
-      </button>
+      </div>
       ${ganttBackgroundCells(days)}
       <button class="gantt-unscheduled-badge" data-gantt-task="${task.id}" type="button">${reason}</button>
     </div>
@@ -1117,23 +1122,45 @@ function ganttTaskRow(task, days, rangeStart, rangeEnd) {
   const span = Math.max(1, naturalDaysBetween(start, end) + 1);
   const risk = task.due && task.schedule.eta > task.due;
   const statusStyle = ganttStatusStyle(task.status);
+  const barContent = ganttBarContent(task.status, task.schedule.eta, span);
   const clippedStart = task.schedule.plannedStart < rangeStart ? " clipped-start" : "";
   const clippedEnd = task.schedule.eta > rangeEnd ? " clipped-end" : "";
   const canReorder = isCapacityIssue(task);
   return `
-    <div class="gantt-row${canReorder ? " gantt-task-row" : ""}" ${canReorder ? `data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}" draggable="true"` : ""}>
-      <button class="gantt-label gantt-task-label" data-gantt-task="${task.id}" type="button" title="${escapeHtml(task.title)}">
-        <strong>${canReorder ? `<i class="gantt-drag-handle" title="ドラッグして順番を変更">⠿</i>` : ""}${escapeHtml(task.title)}</strong>
+    <div class="gantt-row${canReorder ? " gantt-task-row" : ""}" ${canReorder ? `data-gantt-task-row="${task.id}" data-gantt-owner="${escapeHtml(task.owner)}"` : ""}>
+      <div class="gantt-label gantt-task-label" title="${escapeHtml(task.title)}">
+        <div class="gantt-task-heading">${canReorder ? `<i class="gantt-drag-handle" data-gantt-queue-drag="${task.id}" title="ドラッグして順番を変更">⠿</i>` : ""}${ganttIssueLinks(task)}<button class="gantt-task-title" data-gantt-task="${task.id}" type="button"><strong>${escapeHtml(task.title)}</strong></button></div>
         <span>${escapeHtml(task.status)} · ${formatPersonDays(task.schedule.remainingEffortDays)}</span>
-      </button>
+      </div>
       ${ganttBackgroundCells(days)}
-      <button class="gantt-bar${risk ? " risk" : ""}${clippedStart}${clippedEnd}" data-gantt-task="${task.id}" type="button"
+      <button class="gantt-bar${risk ? " risk" : ""}${clippedStart}${clippedEnd}" data-gantt-task="${task.id}" data-gantt-bar="${task.id}" type="button"
         style="${statusStyle}grid-column:${startIndex + 2} / span ${span}"
         title="${escapeHtml(`${task.title} | ${task.schedule.plannedStart} → ${task.schedule.eta} | 期限 ${task.due}`)}">
-        <span>${escapeHtml(task.status)}</span><strong>${escapeHtml(task.schedule.eta)}</strong>
+        ${barContent.status ? `<span>${escapeHtml(task.status)}</span>` : ""}${barContent.eta ? `<strong>${escapeHtml(task.schedule.eta)}</strong>` : ""}<span class="gantt-drag-date" aria-live="polite"></span>
       </button>
     </div>
   `;
+}
+
+function ganttBarContent(status, eta, span) {
+  const availableWidth = Math.max(0, span * 34 - 16);
+  const statusWidth = estimateGanttTextWidth(status);
+  const etaWidth = estimateGanttTextWidth(eta);
+  if (statusWidth <= availableWidth) {
+    return { status: true, eta: statusWidth + 5 + etaWidth <= availableWidth };
+  }
+  return { status: false, eta: etaWidth <= availableWidth };
+}
+
+function estimateGanttTextWidth(value) {
+  return [...String(value || "")].reduce((width, character) => width + (character.codePointAt(0) > 255 ? 11 : 6.2), 0);
+}
+
+function ganttIssueLinks(task) {
+  return taskIssueReferences(task).map((reference) => reference.url
+    ? `<a class="issue-number" href="${escapeHtml(reference.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(reference.label)} を開く">${escapeHtml(reference.label)}</a>`
+    : `<span class="issue-number">${escapeHtml(reference.label)}</span>`
+  ).join("");
 }
 
 function ganttLegendItem(status) {
@@ -1161,45 +1188,174 @@ function ganttBackgroundCells(days) {
   return days.map((dateString, index) => `<div class="gantt-day-cell ${ganttDayClass(dateString)}" style="grid-column:${index + 2}"></div>`).join("");
 }
 
+function formatGanttCompactDate(dateString) {
+  if (!dateString) return "—";
+  const currentYear = todayOffset(0).slice(0, 4);
+  return dateString.slice(0, 4) === currentYear
+    ? dateString.slice(5).replace("-", "/")
+    : dateString.replaceAll("-", "/");
+}
+
 function wireGanttDragAndDrop() {
-  const rows = els.scheduleView.querySelectorAll("[data-gantt-task-row]");
-  rows.forEach((row) => {
-    row.addEventListener("dragstart", (event) => {
-      ganttDragTaskId = row.dataset.ganttTaskRow || "";
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("application/x-gantt-task", ganttDragTaskId);
-      event.dataTransfer.setData("text/plain", ganttDragTaskId);
+  let activeQueueDrag = null;
+  els.scheduleView.querySelectorAll("[data-gantt-queue-drag]").forEach((handle) => {
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const row = handle.closest("[data-gantt-task-row]");
+      const taskId = handle.dataset.ganttQueueDrag || "";
+      if (!row || !taskId) return;
+      const ownerRows = [...els.scheduleView.querySelectorAll("[data-gantt-task-row]")]
+        .filter((item) => item.dataset.ganttOwner === row.dataset.ganttOwner);
+      const firstRect = ownerRows[0]?.getBoundingClientRect();
+      const lastRect = ownerRows.at(-1)?.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      if (!firstRect || !lastRect) return;
+      activeQueueDrag = {
+        handle,
+        row,
+        taskId,
+        pointerId: event.pointerId,
+        originY: event.clientY,
+        minOffset: firstRect.top - rowRect.top,
+        maxOffset: lastRect.bottom - rowRect.bottom,
+        ownerRows,
+        rowHeight: rowRect.height,
+        sourceIndex: ownerRows.indexOf(row),
+        destinationIndex: ownerRows.indexOf(row),
+        moved: false,
+        target: null,
+        after: false
+      };
+      handle.setPointerCapture(event.pointerId);
       row.classList.add("dragging");
-    });
-
-    row.addEventListener("dragover", (event) => {
-      const draggedId = ganttDragTaskId || event.dataTransfer.getData("application/x-gantt-task");
-      const dragged = state.tasks.find((task) => task.id === draggedId);
-      if (!dragged || draggedId === row.dataset.ganttTaskRow || dragged.owner !== row.dataset.ganttOwner) return;
       event.preventDefault();
-      const before = event.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      row.classList.toggle("drop-before", before);
-      row.classList.toggle("drop-after", !before);
     });
 
-    row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
-
-    row.addEventListener("drop", (event) => {
-      const draggedId = ganttDragTaskId || event.dataTransfer.getData("application/x-gantt-task");
-      const dragged = state.tasks.find((task) => task.id === draggedId);
-      const targetId = row.dataset.ganttTaskRow;
-      if (!dragged || !targetId || draggedId === targetId || dragged.owner !== row.dataset.ganttOwner) return;
+    handle.addEventListener("pointermove", (event) => {
+      const drag = activeQueueDrag;
+      if (!drag || drag.handle !== handle || drag.pointerId !== event.pointerId) return;
+      const offset = Math.max(drag.minOffset, Math.min(drag.maxOffset, event.clientY - drag.originY));
+      drag.moved ||= Math.abs(offset) > 4;
+      drag.row.style.setProperty("--gantt-drag-y", `${offset}px`);
+      // Derive the destination from the number of rows crossed.  This remains stable while
+      // neighbouring rows animate out of the way and supports crossing multiple tasks.
+      drag.destinationIndex = Math.max(0, Math.min(
+        drag.ownerRows.length - 1,
+        drag.sourceIndex + Math.round(offset / drag.rowHeight)
+      ));
+      els.scheduleView.querySelectorAll(".gantt-task-row").forEach((item) => item.classList.remove("drop-before", "drop-after"));
+      drag.target = null;
+      if (drag.destinationIndex > drag.sourceIndex) {
+        drag.target = drag.ownerRows[drag.destinationIndex];
+        drag.after = true;
+      } else if (drag.destinationIndex < drag.sourceIndex) {
+        drag.target = drag.ownerRows[drag.destinationIndex];
+        drag.after = false;
+      }
+      if (drag.target) {
+        drag.target.classList.add(drag.after ? "drop-after" : "drop-before");
+      }
+      updateGanttQueueDragSlots(drag);
       event.preventDefault();
-      const after = event.clientY >= row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      moveGanttQueueTask(draggedId, targetId, after);
     });
 
-    row.addEventListener("dragend", () => {
-      suppressScheduleClickUntil = Date.now() + 250;
-      ganttDragTaskId = "";
-      els.scheduleView.querySelectorAll(".gantt-task-row").forEach((item) => item.classList.remove("dragging", "drop-before", "drop-after"));
-    });
+    const finishQueueDrag = (event, cancelled = false) => {
+      const drag = activeQueueDrag;
+      if (!drag || drag.handle !== handle || drag.pointerId !== event.pointerId) return;
+      activeQueueDrag = null;
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      drag.row.style.removeProperty("--gantt-drag-y");
+      els.scheduleView.querySelectorAll(".gantt-task-row").forEach((item) => {
+        item.classList.remove("dragging", "drop-before", "drop-after", "queue-shifting");
+        item.style.removeProperty("--gantt-queue-shift");
+      });
+      if (drag.moved) suppressScheduleClickUntil = Date.now() + 450;
+      if (!cancelled && drag.moved && drag.target) moveGanttQueueTask(drag.taskId, drag.target.dataset.ganttTaskRow, drag.after);
+    };
+    handle.addEventListener("pointerup", finishQueueDrag);
+    handle.addEventListener("pointercancel", (event) => finishQueueDrag(event, true));
   });
+
+  const rangeStart = els.scheduleView.querySelector("[data-gantt-range-start]")?.dataset.ganttRangeStart;
+  let activeDateDrag = null;
+  els.scheduleView.querySelectorAll("[data-gantt-bar]").forEach((bar) => {
+    bar.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !rangeStart) return;
+      const task = state.tasks.find((item) => item.id === bar.dataset.ganttBar);
+      const originalStart = task?.schedule?.plannedStart;
+      if (!task || !originalStart) return;
+      activeDateDrag = {
+        bar,
+        task,
+        pointerId: event.pointerId,
+        originX: event.clientX,
+        hasMoved: false,
+        originalStart,
+        previewStart: originalStart,
+        originalGridColumn: bar.style.gridColumn,
+        span: Math.max(1, naturalDaysBetween(originalStart, task.schedule.eta) + 1)
+      };
+      bar.setPointerCapture(event.pointerId);
+      bar.classList.add("is-date-dragging");
+      updateGanttDateDrag(activeDateDrag, rangeStart);
+      event.preventDefault();
+    });
+
+    bar.addEventListener("pointermove", (event) => {
+      if (!activeDateDrag || activeDateDrag.bar !== bar || activeDateDrag.pointerId !== event.pointerId) return;
+      if (Math.abs(event.clientX - activeDateDrag.originX) > 4) activeDateDrag.hasMoved = true;
+      const dayDelta = Math.round((event.clientX - activeDateDrag.originX) / 34);
+      const requestedStart = addCalendarDays(activeDateDrag.originalStart, dayDelta);
+      activeDateDrag.previewStart = nextDateWithCapacity(state, activeDateDrag.task.owner, requestedStart, true) || requestedStart;
+      updateGanttDateDrag(activeDateDrag, rangeStart);
+      event.preventDefault();
+    });
+
+    const finishDateDrag = (event, cancelled = false) => {
+      if (!activeDateDrag || activeDateDrag.bar !== bar || activeDateDrag.pointerId !== event.pointerId) return;
+      const drag = activeDateDrag;
+      activeDateDrag = null;
+      if (bar.hasPointerCapture(event.pointerId)) bar.releasePointerCapture(event.pointerId);
+      bar.classList.remove("is-date-dragging");
+      // Browsers emit a click after pointerup.  A real drag must never open the task dialog,
+      // including tiny drags that round back to the original working day.
+      if (drag.hasMoved) suppressScheduleClickUntil = Date.now() + 450;
+      if (cancelled || drag.previewStart === drag.originalStart) {
+        bar.style.gridColumn = drag.originalGridColumn;
+        return;
+      }
+      drag.task.schedule = { ...normalizeTaskSchedule(drag.task.schedule), plannedStartOverride: drag.previewStart };
+      recalculateSchedules(state);
+      markStateMutation(`「${drag.task.title}」の予定開始日をドラッグで変更`);
+      render();
+    };
+    bar.addEventListener("pointerup", finishDateDrag);
+    bar.addEventListener("pointercancel", (event) => finishDateDrag(event, true));
+  });
+}
+
+function updateGanttQueueDragSlots(drag) {
+  drag.ownerRows.forEach((item) => {
+    item.classList.remove("queue-shifting");
+    item.style.removeProperty("--gantt-queue-shift");
+  });
+  if (!drag.target) return;
+  const { sourceIndex, destinationIndex } = drag;
+  if (destinationIndex === sourceIndex) return;
+  drag.ownerRows.forEach((item, index) => {
+    if (item === drag.row) return;
+    const shiftsUp = destinationIndex > sourceIndex && index > sourceIndex && index <= destinationIndex;
+    const shiftsDown = destinationIndex < sourceIndex && index >= destinationIndex && index < sourceIndex;
+    if (!shiftsUp && !shiftsDown) return;
+    item.classList.add("queue-shifting");
+    item.style.setProperty("--gantt-queue-shift", `${shiftsUp ? -drag.rowHeight : drag.rowHeight}px`);
+  });
+}
+
+function updateGanttDateDrag(drag, rangeStart) {
+  const startIndex = naturalDaysBetween(rangeStart, drag.previewStart);
+  drag.bar.style.gridColumn = `${startIndex + 2} / span ${drag.span}`;
+  drag.bar.querySelector(".gantt-drag-date").textContent = `開始 ${drag.previewStart}`;
 }
 
 function moveGanttQueueTask(taskId, targetId, after) {
@@ -1256,7 +1412,7 @@ function renderPeople() {
     .map(([owner, tasks]) => {
       const sorted = tasks.sort(sortByUrgency);
       const overdue = sorted.filter((task) => daysUntil(task.due) < 0);
-      const high = sorted.filter((task) => task.priority === "高");
+      const high = sorted.filter(isHighRank);
       const stalled = sorted.filter(isTaskStalled);
       const lead = sorted[0];
       return `
@@ -1276,7 +1432,7 @@ function renderPeople() {
   const externalIssueSection = externalRows
     ? `
       <div class="section-title compact-section-title"><h3>チーム外担当 Issue</h3><span class="tag">${Object.keys(externalIssueGroups).length}</span></div>
-      <table class="list-table"><thead><tr><th>担当者</th><th>Issue</th><th>期限超過</th><th>高優先度</th><th>停滞</th><th>代表 Issue</th></tr></thead><tbody>${externalRows}</tbody></table>
+      <table class="list-table"><thead><tr><th>担当者</th><th>Issue</th><th>期限超過</th><th>S・A Rank</th><th>停滞</th><th>代表 Issue</th></tr></thead><tbody>${externalRows}</tbody></table>
     `
     : `
       <div class="section-title compact-section-title"><h3>チーム外担当 Issue</h3><span class="tag">0</span></div>
@@ -1582,17 +1738,7 @@ function compactTaskCard(task) {
     : task.type === "todo"
       ? `<button class="todo-check done" data-reopen-todo="${task.id}" type="button" aria-label="Todoに戻す"></button>`
       : `<span class="todo-check done" aria-label="完了済み"></span>`;
-  const ownerMenu = ownerPickerTaskId === task.id
-    ? `<div class="owner-menu" role="menu">
-        ${ownerCandidates().map((member) => `
-          <button class="owner-choice${member === task.owner ? " active" : ""}" data-owner-choice="${escapeHtml(member)}" data-owner-task="${task.id}" type="button" role="menuitem">${escapeHtml(member)}</button>
-        `).join("")}
-        <div class="owner-custom-row">
-          <input class="quick-menu-input" data-owner-input="${task.id}" list="ownerList" maxlength="60" placeholder="担当者名">
-          <button class="tiny-button" data-owner-save="${task.id}" type="button">保存</button>
-        </div>
-      </div>`
-    : "";
+  const ownerMenu = ownerQuickPickerMenu(task);
   const projectControl = projectQuickControl(task);
   const nextAction = nextQuickControl(task, true);
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
@@ -1650,10 +1796,19 @@ function todoCard(task, enableDrag = false) {
   `;
 }
 
+function isHighRank(task) {
+  return ["S", "A"].includes(task?.priority);
+}
+
+function priorityTagClass(priority) {
+  const classes = { "なし": "rank-none", S: "rank-s", A: "rank-a", B: "rank-b", C: "rank-c", D: "rank-d", E: "rank-e" };
+  return classes[priority] || "rank-none";
+}
+
 function taskCard(task, enableDrag = false) {
   const urgencyClass = daysUntil(task.due) < 0 && !isDone(task) ? "overdue" : daysUntil(task.due) <= 2 && !isDone(task) ? "soon" : "";
   const gitlabClass = isGitLabClosed(task) ? "gitlab-closed" : "";
-  const priorityClass = task.priority === "高" ? "high" : task.priority === "中" ? "middle" : "low";
+  const priorityClass = priorityTagClass(task.priority);
   const canFinish = !isDone(task);
   const issueBadge = issueBadges(task, "issue-number");
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
@@ -1664,17 +1819,7 @@ function taskCard(task, enableDrag = false) {
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
-  const ownerMenu = ownerPickerTaskId === task.id
-    ? `<div class="owner-menu" role="menu">
-        ${ownerCandidates().map((member) => `
-          <button class="owner-choice${member === task.owner ? " active" : ""}" data-owner-choice="${escapeHtml(member)}" data-owner-task="${task.id}" type="button" role="menuitem">${escapeHtml(member)}</button>
-        `).join("")}
-        <div class="owner-custom-row">
-          <input class="quick-menu-input" data-owner-input="${task.id}" list="ownerList" maxlength="60" placeholder="担当者名">
-          <button class="tiny-button" data-owner-save="${task.id}" type="button">保存</button>
-        </div>
-      </div>`
-    : "";
+  const ownerMenu = ownerQuickPickerMenu(task);
   const projectControl = projectQuickControl(task);
   const priorityControl = priorityQuickControl(task, priorityClass);
   const stalledBadge = isTaskStalled(task) ? `<span class="stalled-badge">${stalledDays(task)}日停滞</span>` : "";
@@ -1715,28 +1860,167 @@ function scheduleBadge(task) {
 function projectQuickControl(task) {
   const projects = [...new Set([...state.tasks.map((item) => item.project), task.project].filter(Boolean))].sort();
   const menu = projectPickerTaskId === task.id
-    ? `<div class="owner-menu project-menu" role="menu">
-        ${projects.map((project) => `
-          <button class="owner-choice${project === task.project ? " active" : ""}" data-project-choice="${escapeHtml(project)}" data-project-task="${task.id}" type="button" role="menuitem">${escapeHtml(project)}</button>
-        `).join("")}
-        <div class="owner-custom-row">
-          <input class="quick-menu-input" value="${escapeHtml(task.project)}" data-project-input="${task.id}" list="projectList" maxlength="40" placeholder="案件名">
-          <button class="tiny-button" data-project-save="${task.id}" type="button">保存</button>
-        </div>
-      </div>`
+    ? quickPickerMenu({
+      menuClass: "owner-menu project-menu",
+      options: projects,
+      selected: task.project,
+      taskId: task.id,
+      choiceClass: "owner-choice",
+      choiceValueData: "data-project-choice",
+      choiceTaskData: "data-project-task",
+      allowCustom: true,
+      inputData: "data-project-input",
+      saveData: "data-project-save",
+      listId: "projectList",
+      maxLength: 40,
+      placeholder: "案件名",
+      initialValue: task.project
+    })
     : "";
   return `<span class="quick-field-wrap project-quick-wrap"><button class="project-name" data-project-picker="${task.id}" data-project-filter="${escapeHtml(task.project)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.project)}</button>${menu}</span>`;
 }
 
 function priorityQuickControl(task, priorityClass) {
   const menu = priorityPickerTaskId === task.id
-    ? `<div class="quick-menu priority-menu" role="menu">
-        ${priorities.map((priority) => `
-          <button class="quick-choice${priority === task.priority ? " active" : ""}" data-priority-choice="${priority}" data-priority-task="${task.id}" type="button" role="menuitem">${priority}</button>
-        `).join("")}
-      </div>`
+    ? quickPickerMenu({
+      menuClass: "quick-menu priority-menu",
+      options: priorities,
+      selected: task.priority,
+      taskId: task.id,
+      choiceClass: "quick-choice",
+      choiceValueData: "data-priority-choice",
+      choiceTaskData: "data-priority-task"
+    })
     : "";
   return `<span class="quick-field-wrap"><button class="tag ${priorityClass} priority-button" data-priority-picker="${task.id}" data-priority-filter="${escapeHtml(task.priority)}" type="button" title="クリックで変更、Ctrl+クリックで絞り込み">${escapeHtml(task.priority)}</button>${menu}</span>`;
+}
+
+function ownerQuickPickerMenu(task) {
+  if (ownerPickerTaskId !== task.id) return "";
+  return quickPickerMenu({
+    menuClass: "owner-menu",
+    options: ownerCandidates(),
+    selected: task.owner,
+    taskId: task.id,
+    choiceClass: "owner-choice",
+    choiceValueData: "data-owner-choice",
+    choiceTaskData: "data-owner-task",
+    allowCustom: true,
+    inputData: "data-owner-input",
+    saveData: "data-owner-save",
+    listId: "ownerList",
+    maxLength: 60,
+    placeholder: "担当者名"
+  });
+}
+
+function quickPickerMenu({ menuClass, options, selected, taskId, choiceClass, choiceValueData, choiceTaskData, allowCustom = false, inputData = "", saveData = "", listId = "", maxLength = 60, placeholder = "", initialValue = "" }) {
+  const choices = options.map((option) => `
+    <button class="${choiceClass}${option === selected ? " active" : ""}" ${choiceValueData}="${escapeHtml(option)}" ${choiceTaskData}="${taskId}" type="button" role="menuitem">${escapeHtml(option)}</button>
+  `).join("");
+  const customInput = allowCustom
+    ? `<div class="owner-custom-row">
+        <input class="quick-menu-input" value="${escapeHtml(initialValue)}" ${inputData}="${taskId}" list="${listId}" maxlength="${maxLength}" placeholder="${escapeHtml(placeholder)}">
+        <button class="tiny-button" ${saveData}="${taskId}" type="button">保存</button>
+      </div>`
+    : "";
+  return `<div class="quick-picker-menu ${menuClass}" role="menu">${choices}${customInput}</div>`;
+}
+
+function taskDialogPickerConfig(field) {
+  const type = els.taskType.value || "issue";
+  const projects = [...new Set([...state.tasks.map((item) => item.project), els.taskProject.value, type === "todo" ? "Todo" : "Issue"].filter(Boolean))].sort();
+  const configs = {
+    taskType: { options: ["issue", "todo"], labels: { issue: "Issue", todo: "Todo" } },
+    taskProject: { options: projects, allowCustom: true, placeholder: "案件名", listId: "projectList", maxLength: 60 },
+    taskOwner: { options: ownerCandidates(), allowCustom: true, placeholder: "担当者名", listId: "ownerList", maxLength: 60 },
+    taskStatus: { options: type === "todo" ? [todoOpenStatus, todoDoneStatus] : [...state.workflow, completedStatus] },
+    taskPriority: { options: priorities },
+    qualityAnalysisStatus: { options: qualityAnalysisStatusOptions },
+    qualityRouteType: { options: ["", ...qualityRouteTypes], labels: { "": "未設定" } },
+    qualityScope: { options: ["", ...qualityScopes], labels: { "": "未設定" } },
+    qualityReproducibility: { options: ["", ...qualityReproducibility], labels: { "": "未設定" } },
+    qualityExternalDependency: { options: ["", ...qualityExternalDependencies], labels: { "": "未設定" } },
+    qualityDiscoveryPhase: { options: ["", ...qualityDiscoveryPhases], labels: { "": "未設定" } }
+  };
+  return configs[field];
+}
+
+function renderTaskDialogPickers() {
+  ["taskType", "taskProject", "taskOwner", "taskStatus", "taskPriority", "qualityAnalysisStatus", "qualityRouteType", "qualityScope", "qualityReproducibility", "qualityExternalDependency", "qualityDiscoveryPhase"].forEach((field) => {
+    const container = els[`${field}Picker`];
+    const config = taskDialogPickerConfig(field);
+    if (!container || !config) return;
+    const value = els[field].value !== "" ? els[field].value : (config.options.includes("") ? "" : config.options[0] || "");
+    const label = config.labels?.[value] || value;
+    const menu = taskDialogPickerOpen === field
+      ? quickPickerMenu({
+        menuClass: "dialog-picker-menu",
+        options: config.options,
+        selected: value,
+        taskId: field,
+        choiceClass: "owner-choice",
+        choiceValueData: "data-dialog-picker-value",
+        choiceTaskData: "data-dialog-picker-field",
+        allowCustom: config.allowCustom,
+        inputData: "data-dialog-picker-input",
+        saveData: "data-dialog-picker-save",
+        listId: config.listId,
+        maxLength: config.maxLength,
+        placeholder: config.placeholder,
+        initialValue: config.allowCustom ? value : ""
+      })
+      : "";
+    container.innerHTML = `<button class="dialog-picker-button" data-dialog-picker-button="${field}" type="button">${escapeHtml(label)}</button>${menu}`;
+  });
+}
+
+function handleTaskDialogPickerClick(event) {
+  const opener = event.target.closest("[data-dialog-picker-button]");
+  const choice = event.target.closest("[data-dialog-picker-value]");
+  const save = event.target.closest("[data-dialog-picker-save]");
+  if (opener) {
+    event.preventDefault();
+    taskDialogPickerOpen = taskDialogPickerOpen === opener.dataset.dialogPickerButton ? "" : opener.dataset.dialogPickerButton;
+    renderTaskDialogPickers();
+  } else if (choice) {
+    event.preventDefault();
+    setTaskDialogPickerValue(choice.dataset.dialogPickerField, choice.dataset.dialogPickerValue);
+  } else if (save) {
+    event.preventDefault();
+    const field = save.dataset.dialogPickerSave;
+    const input = els[`${field}Picker`]?.querySelector("[data-dialog-picker-input]");
+    setTaskDialogPickerValue(field, input?.value || "");
+  }
+}
+
+function handleTaskDialogPickerKeydown(event) {
+  if (event.key !== "Enter" || !event.target.matches("[data-dialog-picker-input]")) return;
+  event.preventDefault();
+  setTaskDialogPickerValue(event.target.dataset.dialogPickerInput, event.target.value);
+}
+
+function setTaskDialogPickerValue(field, value) {
+  const config = taskDialogPickerConfig(field);
+  const normalized = config?.allowCustom ? normalizeName(value) : value;
+  if (!config || (config.allowCustom && !normalized) || (!config.allowCustom && !config.options.includes(normalized))) return;
+  els[field].value = normalized;
+  taskDialogPickerOpen = "";
+  if (field === "taskType") {
+    if (!els.taskId.value) els.taskDue.value = defaultDueForType(normalized);
+    if (normalized === "todo") clearAutoFilledIssueTitle();
+    fillStatusSelect(normalized);
+    syncIssueLinkRequirement();
+    syncCompletedAtField();
+    syncTaskNextLabel();
+    syncRecurrenceField();
+    syncQualityAnalysisSection();
+    syncScheduleSection();
+  } else if (field === "taskStatus") {
+    syncCompletedAtField();
+  }
+  renderTaskDialogPickers();
+  previewTaskSchedule();
 }
 
 function nextQuickControl(task, compact = false) {
@@ -1840,7 +2124,7 @@ function wireTaskButtons(root) {
     input.addEventListener("change", (event) => {
       event.stopPropagation();
       const taskId = input.dataset.dueChoice;
-      if (!taskId || !input.value) return;
+      if (!taskId) return;
       updateTask(taskId, { due: input.value }, `「${state.tasks.find((task) => task.id === taskId)?.title || "Issue"}」の期限を変更`);
       duePickerTaskId = "";
       render();
@@ -1956,7 +2240,7 @@ function wireTaskButtons(root) {
       event.preventDefault();
       event.stopPropagation();
       if (event.ctrlKey) {
-        filterTasksBySearch(`優先:${button.dataset.priorityFilter}`, currentView());
+        filterTasksBySearch(`Rank:${button.dataset.priorityFilter}`, currentView());
         return;
       }
       priorityPickerTaskId = priorityPickerTaskId === button.dataset.priorityPicker ? "" : button.dataset.priorityPicker;
@@ -1976,7 +2260,7 @@ function wireTaskButtons(root) {
       const taskId = button.dataset.priorityTask;
       const priority = button.dataset.priorityChoice;
       if (!taskId || !priorities.includes(priority)) return;
-      updateTask(taskId, { priority }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の優先度を変更`);
+      updateTask(taskId, { priority }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の Rank を変更`);
       priorityPickerTaskId = "";
       pendingDoneTaskId = "";
       pendingConvertTaskId = "";
@@ -2774,8 +3058,9 @@ function openTaskDialog(id, overrides = {}) {
   lastManualTaskTitleValue = els.taskTitle.value;
   els.taskProject.value = overrides.project || task?.project || (type === "todo" ? "Todo" : "Issue");
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
-  els.taskDue.value = overrides.due || task?.due || defaultDueForType(type);
-  els.taskPriority.value = overrides.priority || task?.priority || "中";
+  taskDialogPickerOpen = "";
+  els.taskDue.value = overrides.due ?? task?.due ?? defaultDueForType(type);
+  els.taskPriority.value = overrides.priority || task?.priority || "なし";
   els.taskRecurrence.value = type === "todo" ? overrides.recurrence || task?.recurrence || "" : "";
   els.taskLinkedIssueId.value = overrides.linkedIssueId || task?.linkedIssueId || "";
   els.taskCompletedAt.value = overrides.completedAt || task?.completedAt || todayOffset(0);
@@ -2800,6 +3085,7 @@ function openTaskDialog(id, overrides = {}) {
   syncRecurrenceField();
   syncQualityAnalysisSection();
   syncScheduleSection();
+  renderTaskDialogPickers();
   els.dialog.showModal();
   autoResizeTaskNext();
   if (taskDialogDraft && taskDialogDraft.id === (task?.id || "")) {
@@ -2815,13 +3101,15 @@ function restoreTaskDialogDraft() {
   els.taskTitle.value = d.title;
   els.taskProject.value = d.project;
   els.taskOwner.value = d.owner;
+  renderTaskDialogPickers();
   els.taskDue.value = d.due;
-  if (els.taskStatus.querySelector(`option[value="${CSS.escape(d.status)}"]`)) els.taskStatus.value = d.status;
+  if (taskDialogPickerConfig("taskStatus").options.includes(d.status)) els.taskStatus.value = d.status;
   els.taskPriority.value = d.priority;
   els.taskRecurrence.value = d.recurrence;
   els.taskNext.value = d.next;
   els.taskNotes.value = d.notes;
   els.taskRemainingEffort.value = d.remainingEffort;
+  renderTaskDialogPickers();
   els.qualityAnalysisStatus.value = d.qualityAnalysisStatus;
   els.qualityRouteType.value = d.qualityRouteType;
   els.qualityScope.value = d.qualityScope;
@@ -2853,7 +3141,7 @@ function taskTitleValueForSave(type, existingTask) {
 }
 
 function syncTaskNextLabel() {
-  const labelText = els.taskType.value === "issue" ? "イシュー詳細" : "次のアクション";
+  const labelText = els.taskType.value === "issue" ? "概要" : "次のアクション";
   els.taskNextLabel.firstChild.textContent = labelText;
 }
 
@@ -2964,6 +3252,7 @@ function fillQualityForm(quality) {
   els.qualityReproducibility.value = normalized.reproducibility;
   els.qualityExternalDependency.value = normalized.externalDependency;
   els.qualityDiscoveryPhase.value = normalized.discoveryPhase;
+  renderTaskDialogPickers();
 }
 
 function readQualityForm() {
@@ -3465,7 +3754,7 @@ function parseSearchQuery(query) {
     "種別": "type", type: "type",
     "期限": "due", due: "due",
     "状態": "status", "ステータス": "status", status: "status",
-    "優先": "priority", "優先度": "priority", priority: "priority",
+    "優先": "priority", "優先度": "priority", "Rank": "priority", rank: "priority", priority: "priority",
     "次": "next", "次のアクション": "next", next: "next",
     "経路": "qualityRouteType", "経路タイプ": "qualityRouteType",
     "関連範囲": "qualityScope",
@@ -3666,8 +3955,8 @@ function downloadCsv(filename, headers, rows) {
 
 function exportIssuesToCsv() {
   const headers = [
-    "No.", "タイトル", "案件", "担当者", "期限", "ステータス", "優先度",
-    "残り工数（人日）", "Queue順位", "予定開始", "予定MR（ETA）", "初回ETA",
+    "No.", "タイトル", "案件", "担当者", "期限", "ステータス", "Rank",
+    "残り工数（人日）", "優先順位", "予定開始", "予定完了", "初回予定完了日（基準）",
     "経路タイプ", "関連範囲", "再現性", "外部依存", "発見フェーズ", "原因・対策分析",
     "次のアクション／詳細", "メモ", "Issue", "作成日", "更新日"
   ];
@@ -4140,9 +4429,9 @@ function migrateState(rawState) {
       type,
       project: task.project || (type === "todo" ? "Todo" : "Issue"),
       owner: task.owner || migrated.members[0] || "自分",
-      due: task.due || todayOffset(3),
+      due: task.due ?? todayOffset(3),
       status: type === "todo" ? (validTodoStatus ? mappedStatus : todoOpenStatus) : (validIssueStatus ? mappedStatus : migrated.workflow[0]),
-      priority: priorities.includes(task.priority) ? task.priority : "中",
+      priority: priorities.includes(task.priority) ? task.priority : (legacyRankMap[task.priority] || "なし"),
       recurrence,
       recurrenceKey: recurrence ? task.recurrenceKey || taskId : "",
       todoPlan: undefined,
@@ -4308,9 +4597,7 @@ function recalculateSchedules(targetState) {
         task.schedule = scheduleWithStatus(schedule, "missing_effort", "", "", now);
         return;
       }
-      const requestedStart = schedule.plannedStartOverride && schedule.plannedStartOverride > todayOffset(0)
-        ? schedule.plannedStartOverride
-        : todayOffset(0);
+      const requestedStart = schedule.plannedStartOverride || todayOffset(0);
       let cursor = nextDateWithCapacity(targetState, member, requestedStart, true);
       let available = cursor ? capacityForDate(targetState, member, cursor) : 0;
       if (!cursor || available <= 0) {
@@ -4496,7 +4783,7 @@ function sortByUrgency(a, b) {
   const doneWeight = (task) => isDone(task) ? 3 : 0;
   const stalledWeight = (task) => isTaskStalled(task) ? -1 : 0;
   const typeWeight = (task) => task.type === "issue" ? -1 : 0;
-  const priorityWeight = { 高: -3, 中: -2, 低: -1 };
+  const priorityWeight = { S: -6, A: -5, B: -4, C: -3, D: -2, E: -1, "なし": 0 };
   return doneWeight(a) - doneWeight(b)
     || stalledWeight(a) - stalledWeight(b)
     || daysUntil(a.due) - daysUntil(b.due)
@@ -4505,7 +4792,7 @@ function sortByUrgency(a, b) {
 }
 
 function sortByTodo(a, b) {
-  const priorityWeight = { 高: -3, 中: -2, 低: -1 };
+  const priorityWeight = { S: -6, A: -5, B: -4, C: -3, D: -2, E: -1, "なし": 0 };
   const typeWeight = (task) => task.type === "issue" ? -1 : 0;
   return daysUntil(a.due) - daysUntil(b.due)
     || priorityWeight[a.priority] - priorityWeight[b.priority]
@@ -4667,6 +4954,7 @@ function dueFilterQuery(dateString) {
 }
 
 function formatDue(dateString) {
+  if (!dateString) return "期限未設定";
   const diff = daysUntil(dateString);
   if (diff < 0) return `${Math.abs(diff)}日遅れ`;
   if (diff === 0) return "本日締切";
