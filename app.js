@@ -143,6 +143,7 @@ const els = {
   taskProjectPicker: document.querySelector("#taskProjectPicker"),
   taskOwner: document.querySelector("#taskOwner"),
   taskOwnerPicker: document.querySelector("#taskOwnerPicker"),
+  taskGitAssignees: document.querySelector("#taskGitAssignees"),
   taskDue: document.querySelector("#taskDue"),
   taskStatus: document.querySelector("#taskStatus"),
   taskStatusPicker: document.querySelector("#taskStatusPicker"),
@@ -592,7 +593,7 @@ function renderWorkflowTopControl() {
   }
 
   els.workflowTopSlot.innerHTML = `
-    <button class="secondary-button icon-button gitlab-refresh-button" data-gitlab-refresh type="button" title="GitLab の Issue 状態を更新" aria-label="GitLab の Issue 状態を更新" ${gitlabRefreshing ? "disabled" : ""}>
+    <button class="secondary-button icon-button gitlab-refresh-button" data-gitlab-refresh type="button" title="GitLab の状態と Git 担当を更新" aria-label="GitLab の状態と Git 担当を更新" ${gitlabRefreshing ? "disabled" : ""}>
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M21 12a9 9 0 0 1-15.4 6.4"></path>
         <path d="M3 12A9 9 0 0 1 18.4 5.6"></path>
@@ -638,7 +639,7 @@ async function refreshGitLabIssueStatuses() {
   if (gitlabRefreshing) return;
   const issueTasks = state.tasks.filter((task) => task.type === "issue" && parseGitLabIssueLink(task.link));
   if (!issueTasks.length) {
-    showToast("更新対象の GitLab Issue URL がありません。", false);
+    showToast("更新対象の GitLab Issue / Work Item URL がありません。", false);
     return;
   }
 
@@ -646,7 +647,7 @@ async function refreshGitLabIssueStatuses() {
 
   gitlabRefreshing = true;
   renderWorkflowTopControl();
-  showToast(`GitLab 状態を更新中... 0/${issueTasks.length} 件成功`, false, { sticky: true });
+  showToast(`GitLab 状態と Git 担当を更新中... 0/${issueTasks.length} 件成功`, false, { sticky: true });
   let successCount = 0;
   const errors = [];
   const checkedAt = new Date().toISOString();
@@ -654,14 +655,14 @@ async function refreshGitLabIssueStatuses() {
   try {
     for (const [index, task] of issueTasks.entries()) {
       const result = await fetchGitLabIssueStatusWithSavedToken(task.link, checkedAt);
-      const gitlab = { ...result, seenUpdatedAt: normalizeGitLabStatus(task.gitlab)?.seenUpdatedAt || "" };
+      const gitlab = mergeGitLabSyncResult(task.gitlab, result);
       if (!result.error) {
         successCount += 1;
       } else {
         errors.push(result.error);
       }
       state.tasks = state.tasks.map((item) => item.id === task.id ? { ...item, gitlab, updatedAt: new Date().toISOString() } : item);
-      showToast(`GitLab 状態を更新中... ${successCount}/${issueTasks.length} 件成功（${index + 1}/${issueTasks.length} 完了）`, false, { sticky: true });
+      showToast(`GitLab 状態と Git 担当を更新中... ${successCount}/${issueTasks.length} 件成功（${index + 1}/${issueTasks.length} 完了）`, false, { sticky: true });
     }
     lastStateSnapshot = serializeState(state);
     pendingMutationLabel = "";
@@ -674,17 +675,17 @@ async function refreshGitLabIssueStatuses() {
   }
 
   if (successCount === issueTasks.length) {
-    showToast(`GitLab 状態を更新しました。${successCount}/${issueTasks.length} 件成功`, false);
+    showToast(`GitLab 状態と Git 担当を更新しました。${successCount}/${issueTasks.length} 件成功`, false);
   } else {
     const firstError = [...new Set(errors)].find(Boolean) || "詳細不明";
-    showToast(`GitLab 状態更新に失敗しました。${successCount}/${issueTasks.length} 件成功: ${firstError}`, false);
+    showToast(`GitLab 状態・Git 担当の更新に失敗しました。${successCount}/${issueTasks.length} 件成功: ${firstError}`, false);
   }
 }
 
 async function fetchGitLabIssueStatus(link, token, checkedAt) {
   const parsed = parseGitLabIssueLink(link);
   if (!parsed) {
-    return { state: "", updatedAt: "", checkedAt, error: "Issue URL を解析できませんでした。" };
+    return { state: "", updatedAt: "", checkedAt, error: "Issue / Work Item URL を解析できませんでした。" };
   }
   let timeoutId = null;
   try {
@@ -703,7 +704,7 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
       return { state: "", updatedAt: "", checkedAt, error: "GitLab token の権限が不足しています。" };
     }
     if (response.status === 404) {
-      return { state: "", updatedAt: "", checkedAt, error: "GitLab project / issue が見つからない、またはアクセス権がありません。" };
+      return { state: "", updatedAt: "", checkedAt, error: "GitLab project / issue / work item が見つからない、またはアクセス権がありません。" };
     }
     if (!response.ok) {
       return { state: "", updatedAt: "", checkedAt, error: `GitLab API ${response.status}` };
@@ -713,6 +714,8 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
       state: issue.state || "",
       title: issue.title || "",
       updatedAt: issue.updated_at || "",
+      assignees: normalizeGitLabAssignees(Array.isArray(issue.assignees) ? issue.assignees : (issue.assignee ? [issue.assignee] : [])),
+      assigneesSynced: true,
       checkedAt,
       error: ""
     };
@@ -730,16 +733,19 @@ function parseGitLabIssueLink(link) {
   if (!value) return null;
   try {
     const url = new URL(value);
-    const match = url.pathname.match(/^\/(.+)\/-\/issues\/(\d+)(?:\/)?$/i);
+    const match = url.pathname.match(/^\/(.+)\/-\/(issues|work_items)\/(\d+)(?:\/)?$/i);
     if (!match) return null;
     const parsedPath = splitGitLabProjectPath(match[1]);
     const projectPath = parsedPath.projectPath;
-    const issueIid = match[2];
+    const resourceType = match[2].toLowerCase();
+    const issueIid = match[3];
+    const apiResourcePath = resourceType === "work_items" ? `-/work_items/${issueIid}` : `issues/${issueIid}`;
     return {
       origin: `${url.origin}${parsedPath.basePath}`,
       projectPath,
       issueIid,
-      apiUrl: `${url.origin}${parsedPath.basePath}/api/v4/projects/${encodeURIComponent(projectPath)}/issues/${issueIid}`
+      resourceType,
+      apiUrl: `${url.origin}${parsedPath.basePath}/api/v4/projects/${encodeURIComponent(projectPath)}/${apiResourcePath}`
     };
   } catch {
     return null;
@@ -898,14 +904,70 @@ function markGitLabSeenFromIssueLink(event) {
 
 function normalizeGitLabStatus(value) {
   if (!value || typeof value !== "object") return null;
+  const hasAssigneeSnapshot = value.assigneesSynced === true
+    || (value.assigneesSynced == null && Array.isArray(value.assignees) && value.assignees.length > 0);
   return {
     state: String(value.state || ""),
     title: String(value.title || ""),
     updatedAt: String(value.updatedAt || ""),
     seenUpdatedAt: String(value.seenUpdatedAt || ""),
     checkedAt: String(value.checkedAt || ""),
+    assignees: normalizeGitLabAssignees(value.assignees),
+    assigneesSynced: hasAssigneeSnapshot,
     error: String(value.error || "")
   };
+}
+
+function normalizeGitLabAssignees(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.map((assignee) => {
+    const raw = assignee && typeof assignee === "object" ? assignee : {};
+    const id = String(raw.id ?? "").trim();
+    const username = String(raw.username || "").trim();
+    const name = String(raw.name || raw.displayName || username || (id ? `ID ${id}` : "")).trim();
+    return { id, name, username };
+  }).filter((assignee) => {
+    const key = assignee.id || assignee.username || assignee.name;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeGitLabSyncResult(existingValue, resultValue) {
+  const existing = normalizeGitLabStatus(existingValue);
+  const result = resultValue && typeof resultValue === "object" ? resultValue : {};
+  if (result.error) {
+    return {
+      ...(existing || normalizeGitLabStatus({})),
+      checkedAt: String(result.checkedAt || existing?.checkedAt || ""),
+      error: String(result.error)
+    };
+  }
+  return normalizeGitLabStatus({
+    ...result,
+    assignees: normalizeGitLabAssignees(result.assignees),
+    assigneesSynced: true,
+    seenUpdatedAt: existing?.seenUpdatedAt || "",
+    error: ""
+  });
+}
+
+function gitLabAssigneeLabel(value) {
+  const gitlab = normalizeGitLabStatus(value);
+  if (!gitlab?.assigneesSynced) return "未同期";
+  if (!gitlab.assignees.length) return "未割り当て";
+  return gitlab.assignees.map((assignee) => assignee.name || assignee.username || `ID ${assignee.id}`).join("、");
+}
+
+function gitAssigneeDisplay(task, compact = false) {
+  if (task?.type !== "issue") return "";
+  const gitlab = normalizeGitLabStatus(task.gitlab);
+  const label = gitLabAssigneeLabel(gitlab);
+  const statusClass = !gitlab?.assigneesSynced ? " unsynced" : !gitlab.assignees.length ? " unassigned" : "";
+  const prefix = compact ? "Git" : "Git担当";
+  return `<span class="git-assignees${statusClass}" title="GitLab から同期する読み取り専用の担当者">${prefix}: ${escapeHtml(label)}</span>`;
 }
 
 function formatDateTime(value) {
@@ -1751,9 +1813,10 @@ function compactTaskCard(task) {
           ${issueBadge}
           <button class="todo-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>
           <div class="compact-owner-wrap">
-            <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
+            <button class="owner-name" data-owner-picker="${task.id}" type="button" title="管理担当を変更">管理: ${escapeHtml(task.owner)}</button>
             ${ownerMenu}
           </div>
+          ${gitAssigneeDisplay(task, true)}
         </div>
         <div class="todo-detail-row">
           ${nextAction}
@@ -1830,8 +1893,9 @@ function taskCard(task, enableDrag = false) {
         <div class="card-top-row">
           <div class="card-issue-list">${issueBadge}</div>
           <div class="card-side">
-            <button class="owner-name" data-owner-picker="${task.id}" type="button">${escapeHtml(task.owner)}</button>
+            <button class="owner-name" data-owner-picker="${task.id}" type="button" title="管理担当を変更">管理: ${escapeHtml(task.owner)}</button>
             ${ownerMenu}
+            ${gitAssigneeDisplay(task)}
           </div>
         </div>
         <h4>${title}</h4>
@@ -3058,6 +3122,8 @@ function openTaskDialog(id, overrides = {}) {
   lastManualTaskTitleValue = els.taskTitle.value;
   els.taskProject.value = overrides.project || task?.project || (type === "todo" ? "Todo" : "Issue");
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
+  els.taskGitAssignees.textContent = type === "issue" ? gitLabAssigneeLabel(task?.gitlab) : "—";
+  els.taskGitAssignees.className = `readonly-assignees${normalizeGitLabStatus(task?.gitlab)?.assigneesSynced ? "" : " unsynced"}`;
   taskDialogPickerOpen = "";
   els.taskDue.value = overrides.due ?? task?.due ?? defaultDueForType(type);
   els.taskPriority.value = overrides.priority || task?.priority || "なし";
@@ -3666,7 +3732,7 @@ function syncIssueLinkRequirement() {
   els.taskLink.setCustomValidity("");
   els.taskLink.required = false;
   els.taskLink.placeholder = isIssue
-    ? "https://example.com/issues/123"
+    ? "https://example.com/group/project/-/work_items/123"
     : "任意: Issue URL / Issue 番号を複数入力できます（改行・カンマ区切り）";
 }
 
@@ -3904,6 +3970,7 @@ function searchableTaskText(task) {
     task.title,
     task.project,
     task.owner,
+    ...normalizeGitLabAssignees(task.gitlab?.assignees).flatMap((assignee) => [assignee.name, assignee.username, assignee.id]),
     task.status,
     task.priority,
     task.next,
@@ -4391,7 +4458,7 @@ function migrateState(rawState) {
     "待辦": "未対応"
   };
   const migrated = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     members: Array.isArray(rawState?.members) ? rawState.members : defaultMembers,
     workflow: Array.isArray(rawState?.workflow) && rawState.workflow.length ? rawState.workflow.map((step) => statusMap[step] || step) : defaultWorkflow,
     tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks,
@@ -4876,7 +4943,7 @@ function extractUrl(value) {
 function extractIssueNumber(value) {
   const rawValue = String(value || "").trim();
   if (isBareIssueNumber(rawValue)) return rawValue;
-  const match = normalizeUrl(value).match(/\/issues\/(\d+)(?:[/?#]|$)/i);
+  const match = normalizeUrl(value).match(/\/(?:issues|work_items)\/(\d+)(?:[/?#]|$)/i);
   return match ? match[1] : "";
 }
 
@@ -4884,7 +4951,7 @@ function issueLabel(value) {
   const number = extractIssueNumber(value);
   if (!number) return "";
   if (isBareIssueNumber(value)) return `#${number}`;
-  const url = normalizeUrl(value).toLowerCase();
+  const url = normalizeUrl(value).toLowerCase().replace("/-/work_items/", "/-/issues/");
   const categories = [
     { path: "/step3/external-test-issue/-/issues/", label: "外結" },
     { path: "/step3/integration-test-issue/-/issues/", label: "総合" },

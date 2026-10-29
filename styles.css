@@ -1921,6 +1921,39 @@ textarea {
   text-decoration: underline;
 }
 
+.git-assignees {
+  display: block;
+  max-width: 180px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-assignees.unsynced,
+.readonly-assignees.unsynced {
+  color: #8a7352;
+}
+
+.git-assignees.unassigned {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.readonly-assignees {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .owner-menu {
   position: absolute;
   z-index: 30;

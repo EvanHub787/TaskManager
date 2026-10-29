@@ -160,8 +160,8 @@
       </div>
       <div class="dialog-body">
         <input id="taskId" type="hidden">
-        <label id="taskLinkLabel" class="full-label" hidden>Issue URL / Issue 番号<textarea id="taskLink" rows="2"
-            maxlength="900" placeholder="https://example.com/issues/123"></textarea></label>
+        <label id="taskLinkLabel" class="full-label" hidden>Issue / Work Item URL・番号<textarea id="taskLink" rows="2"
+            maxlength="900" placeholder="https://example.com/group/project/-/work_items/123"></textarea></label>
         <label class="full-label title-label">タスク名<input id="taskTitle" required maxlength="80"></label>
         <label id="taskNextLabel" class="full-label">概要<textarea id="taskNext" rows="3"
             maxlength="220"></textarea></label>
@@ -172,6 +172,9 @@
           <label>担当者
             <div id="taskOwnerPicker" class="dialog-picker"></div>
             <input id="taskOwner" type="hidden">
+          </label>
+          <label>Git担当
+            <span id="taskGitAssignees" class="readonly-assignees" title="GitLab から同期する読み取り専用の担当者">未同期</span>
           </label>
           <label>期限<input id="taskDue" type="date"></label>
           <label>ステータス<div id="taskStatusPicker" class="dialog-picker"></div><input id="taskStatus" type="hidden"></label>
