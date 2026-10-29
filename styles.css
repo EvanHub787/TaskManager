@@ -1760,8 +1760,12 @@ textarea {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(320px, 380px);
+  align-items: stretch;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
   padding-bottom: 8px;
 }
@@ -1781,8 +1785,11 @@ textarea {
 }
 
 .column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  align-self: start;
+  min-height: 0;
+  align-self: stretch;
   background: #eef3ef;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1801,10 +1808,34 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   gap: 10px;
-  min-height: 72px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
   border-radius: 8px;
   transition: background-color .15s ease;
+}
+
+.cards::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cards::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cards::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #b8c5bc;
+}
+
+#boardView.active {
+  height: 100%;
+  overflow: hidden;
+  padding-bottom: 0;
 }
 
 .cards.drop-active {
@@ -3130,6 +3161,11 @@ label[hidden] {
     overflow: visible;
     padding-right: 0;
     padding-bottom: 0;
+  }
+
+  #boardView.active {
+    height: min(720px, max(420px, calc(100dvh - 180px)));
+    overflow: hidden;
   }
 
   .nav-tabs {

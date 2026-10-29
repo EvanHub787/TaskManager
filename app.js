@@ -560,10 +560,15 @@ function renderDashboard() {
 
 function renderBoard() {
   const previousScrollLeft = els.boardView.querySelector(".board")?.scrollLeft || 0;
+  const previousColumnScrolls = new Map(
+    [...els.boardView.querySelectorAll("[data-drop-status]")]
+      .map((cards) => [cards.dataset.dropStatus, cards.scrollTop])
+  );
   const visible = filteredTasks().filter((task) => task.type === "issue" && task.status !== completedStatus);
-  els.boardView.innerHTML = `
+  const statuses = boardStatusesForView(state.workflow, visible, Boolean(filters.search.trim()));
+  els.boardView.innerHTML = statuses.length ? `
     <div class="board">
-      ${state.workflow.map((status) => {
+      ${statuses.map((status) => {
     const tasks = visible.filter((task) => task.status === status).sort(sortByBoardOrder);
     return `
           <div class="column" data-status="${escapeHtml(status)}">
@@ -573,16 +578,28 @@ function renderBoard() {
         `;
   }).join("")}
     </div>
-  `;
+  ` : emptyState("Issue はありません");
   wireTaskButtons(els.boardView);
   wireBoardDragAndDrop();
   const board = els.boardView.querySelector(".board");
   if (board) {
     board.scrollLeft = previousScrollLeft;
+    board.querySelectorAll("[data-drop-status]").forEach((cards) => {
+      cards.scrollTop = previousColumnScrolls.get(cards.dataset.dropStatus) || 0;
+    });
     requestAnimationFrame(() => {
       board.scrollLeft = previousScrollLeft;
+      board.querySelectorAll("[data-drop-status]").forEach((cards) => {
+        cards.scrollTop = previousColumnScrolls.get(cards.dataset.dropStatus) || 0;
+      });
     });
   }
+}
+
+function boardStatusesForView(workflow, tasks, searchActive) {
+  if (!searchActive) return [...workflow];
+  const resultStatuses = new Set(tasks.map((task) => task.status));
+  return workflow.filter((status) => resultStatuses.has(status));
 }
 
 function renderWorkflowTopControl() {
