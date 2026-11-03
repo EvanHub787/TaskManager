@@ -1920,12 +1920,37 @@ textarea {
 }
 
 .card-side {
+  position: relative;
   display: flex;
-  flex: 0 1 min(46%, 132px);
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 2px 12px;
   min-width: 0;
+  margin: 0 0 6px;
+}
+
+.task-card .owner-name {
+  max-width: 100%;
+  flex: 0 1 auto;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.task-card .git-assignees {
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.task-card .card-side .owner-menu {
+  right: auto;
+  left: 0;
 }
 
 .owner-name {
@@ -3123,7 +3148,7 @@ label[hidden] {
   flex: 1;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 640px) {
   body {
     overflow: auto;
   }

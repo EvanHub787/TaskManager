@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const source = readFileSync(`${__dirname}/app.js`, 'utf8');
 const names = [
   'parseGitLabIssueLink',
+  'isGitLabRefreshCandidate',
   'splitGitLabProjectPath',
   'normalizeUrl',
   'extractIssueNumber',
@@ -18,7 +19,7 @@ const functions = names.map((name) => {
   return source.slice(start, end < 0 ? source.length : end);
 }).join('\n');
 const context = vm.createContext({ URL });
-vm.runInContext(functions, context);
+vm.runInContext(`const completedStatus = "完了";\n${functions}`, context);
 
 const legacy = context.parseGitLabIssueLink('https://gitlab.example.com/team/project/-/issues/123');
 assert.equal(legacy.resourceType, 'issues');
@@ -41,5 +42,15 @@ assert.equal(context.extractIssueNumber('https://gitlab.example.com/team/project
 assert.equal(context.extractIssueNumber('https://gitlab.example.com/team/project/-/work_items/456'), '456');
 assert.equal(context.issueLabel('https://gitlab.example.com/step3/external-test-issue/-/work_items/456'), '外結 #456');
 assert.equal(context.parseGitLabIssueLink('https://gitlab.example.com/team/project/-/merge_requests/1'), null);
+
+const linkedIssue = {
+  type: 'issue',
+  status: '調査中',
+  link: 'https://gitlab.example.com/team/project/-/work_items/456'
+};
+assert.equal(context.isGitLabRefreshCandidate(linkedIssue), true);
+assert.equal(context.isGitLabRefreshCandidate({ ...linkedIssue, status: '完了' }), false);
+assert.equal(context.isGitLabRefreshCandidate({ ...linkedIssue, type: 'todo' }), false);
+assert.equal(context.isGitLabRefreshCandidate({ ...linkedIssue, link: '' }), false);
 
 console.log('GitLab work item link regression checks passed');

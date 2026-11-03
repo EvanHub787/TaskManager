@@ -654,7 +654,7 @@ function workflowStepRow(step, index) {
 
 async function refreshGitLabIssueStatuses() {
   if (gitlabRefreshing) return;
-  const issueTasks = state.tasks.filter((task) => task.type === "issue" && parseGitLabIssueLink(task.link));
+  const issueTasks = state.tasks.filter(isGitLabRefreshCandidate);
   if (!issueTasks.length) {
     showToast("更新対象の GitLab Issue / Work Item URL がありません。", false);
     return;
@@ -697,6 +697,12 @@ async function refreshGitLabIssueStatuses() {
     const firstError = [...new Set(errors)].find(Boolean) || "詳細不明";
     showToast(`GitLab 状態・Git 担当の更新に失敗しました。${successCount}/${issueTasks.length} 件成功: ${firstError}`, false);
   }
+}
+
+function isGitLabRefreshCandidate(task) {
+  return task.type === "issue"
+    && task.status !== completedStatus
+    && Boolean(parseGitLabIssueLink(task.link));
 }
 
 async function fetchGitLabIssueStatus(link, token, checkedAt) {
@@ -1909,11 +1915,11 @@ function taskCard(task, enableDrag = false) {
       <div class="card-heading">
         <div class="card-top-row">
           <div class="card-issue-list">${issueBadge}</div>
-          <div class="card-side">
-            <button class="owner-name" data-owner-picker="${task.id}" type="button" title="管理担当を変更">管理: ${escapeHtml(task.owner)}</button>
-            ${ownerMenu}
-            ${gitAssigneeDisplay(task)}
-          </div>
+        </div>
+        <div class="card-side">
+          <button class="owner-name" data-owner-picker="${task.id}" type="button" title="管理担当を変更">管理: ${escapeHtml(task.owner)}</button>
+          ${ownerMenu}
+          ${gitAssigneeDisplay(task)}
         </div>
         <h4>${title}</h4>
       </div>
