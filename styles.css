@@ -765,6 +765,18 @@ svg {
   text-align: center;
 }
 
+.nav-count {
+  min-width: 20px;
+  margin-left: auto;
+  border-radius: 999px;
+  padding: 3px 6px;
+  background: #d8f3e4;
+  color: #164d3d;
+  font-size: 10px;
+  font-weight: 850;
+  text-align: center;
+}
+
 .side-panel {
   min-height: 0;
   max-height: min(56vh, 520px);
@@ -2571,9 +2583,13 @@ textarea {
   gap: 10px;
 }
 
+.member-form {
+  grid-template-columns: minmax(160px, 260px) minmax(180px, 280px) auto;
+}
+
 .member-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -2593,6 +2609,104 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #f8faf8;
+}
+
+.member-row {
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr) auto auto auto auto;
+}
+
+.member-field {
+  display: grid;
+  gap: 4px;
+}
+
+.member-field span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.discovery-settings {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.discovery-settings h3,
+.discovery-settings p {
+  margin: 0;
+}
+
+.discovery-scope-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.discovery-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(18, 113, 91, .2);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.discovery-scope b {
+  min-width: 18px;
+  border-radius: 999px;
+  padding: 2px 5px;
+  background: #fff;
+  color: var(--ink);
+  text-align: center;
+}
+
+.discovery-settings p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.discovery-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.discovery-table-wrap {
+  overflow-x: auto;
+}
+
+.discovery-table {
+  min-width: 760px;
+}
+
+.discovery-table td:nth-child(2) {
+  min-width: 260px;
+}
+
+.discovery-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.compact-button {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .member-row.is-self {

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TaskManager</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20261103-assignee-row-v4">
+  <link rel="stylesheet" href="styles.css?v=20261103-gitlab-discovery-v2">
 </head>
 
 <body>
@@ -32,6 +32,9 @@
         </button>
         <button class="nav-button" data-view="board" type="button">
           <span class="icon">▦</span>Issue
+        </button>
+        <button class="nav-button" data-view="discovery" type="button">
+          <span class="icon">◇</span>待収録<span id="discoveryCount" class="nav-count" hidden>0</span>
         </button>
         <button class="nav-button" data-view="todo" type="button">
           <span class="icon">□</span>Todo
@@ -141,6 +144,7 @@
 
       <section id="dashboardView" class="view active"></section>
       <section id="boardView" class="view"></section>
+      <section id="discoveryView" class="view"></section>
       <section id="todoView" class="view"></section>
       <section id="projectsView" class="view"></section>
       <section id="scheduleView" class="view"></section>
@@ -285,7 +289,7 @@
 
   <datalist id="projectList"></datalist>
   <datalist id="ownerList"></datalist>
-  <script src="app.js?v=20261103-skip-completed-refresh"></script>
+  <script src="app.js?v=20261103-gitlab-discovery-v2"></script>
 </body>
 
 </html>

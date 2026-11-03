@@ -5,11 +5,16 @@ const assert = require('node:assert/strict');
 const source = readFileSync(`${__dirname}/app.js`, 'utf8');
 const names = [
   'parseGitLabIssueLink',
+  'gitLabIssueIdentity',
+  'normalizeDiscoveredGitLabIssue',
+  'normalizeGitLabUsername',
+  'normalizeGitLabAssignees',
   'isGitLabRefreshCandidate',
   'splitGitLabProjectPath',
   'normalizeUrl',
   'extractIssueNumber',
   'issueLabel',
+  'issueCategory',
   'isBareIssueNumber'
 ];
 const functions = names.map((name) => {
@@ -42,6 +47,29 @@ assert.equal(context.extractIssueNumber('https://gitlab.example.com/team/project
 assert.equal(context.extractIssueNumber('https://gitlab.example.com/team/project/-/work_items/456'), '456');
 assert.equal(context.issueLabel('https://gitlab.example.com/step3/external-test-issue/-/work_items/456'), '外結 #456');
 assert.equal(context.parseGitLabIssueLink('https://gitlab.example.com/team/project/-/merge_requests/1'), null);
+assert.equal(
+  context.gitLabIssueIdentity('https://gitlab.example.com/team/project/-/issues/456'),
+  context.gitLabIssueIdentity('https://gitlab.example.com/team/project/-/work_items/456')
+);
+
+assert.equal(context.normalizeGitLabUsername('@Member.One'), 'member.one');
+
+assert.equal(context.issueCategory('https://gitlab.example.com/step3/external-test-issue/-/work_items/1'), '外結');
+assert.equal(context.issueCategory('https://gitlab.example.com/step3/integration-test-issue/-/issues/2'), '総合');
+assert.equal(context.issueCategory('https://gitlab.example.com/001-sej/issue/-/work_items/3'), '開発');
+assert.equal(context.issueCategory('https://gitlab.example.com/001-sej/unit-integration-tests/step3/-/issues/4'), '単結');
+
+const discovered = context.normalizeDiscoveredGitLabIssue({
+  iid: 456,
+  title: '未収録 Issue',
+  state: 'opened',
+  web_url: 'https://gitlab.example.com/team/project/-/work_items/456',
+  updated_at: '2026-11-03T00:00:00Z',
+  assignees: [{ id: 1, name: 'Member One', username: 'member.one' }]
+});
+assert.equal(discovered.projectPath, 'team/project');
+assert.equal(discovered.assignees[0].username, 'member.one');
+assert.equal(context.normalizeDiscoveredGitLabIssue({ ...discovered, state: 'closed' }), null);
 
 const linkedIssue = {
   type: 'issue',

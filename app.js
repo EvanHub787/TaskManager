@@ -12,6 +12,7 @@ const qualityExternalDependencies = ["なし", "カメラ", "通信", "装置", 
 const qualityDiscoveryPhases = ["単体テスト", "結合テスト", "社内検証", "顧客テスト", "現地"];
 const qualityAnalysisStatusOptions = ["未確認", "記載完了"];
 const relatedIssueTypes = ["主Issue", "関連Issue", "横展開", "同根因"];
+const gitLabDiscoveryCategories = ["外結", "開発", "総合"];
 const selfMemberDefault = "自分";
 const storageKey = "follow-manager-v1";
 const historyKey = "follow-manager-history-v1";
@@ -98,7 +99,9 @@ let suppressHistoryCapture = true;
 let toastTimer = null;
 let appDatabase = null;
 let gitlabRefreshing = false;
+let gitlabDiscoveryLoading = false;
 let gitlabTitleRequestId = 0;
+let newTaskGitLabSeed = null;
 let lastManualTaskTitleValue = "";
 let taskDialogDraft = null;
 let ganttWeekOffset = 0;
@@ -111,6 +114,8 @@ const els = {
   navButtons: document.querySelectorAll(".nav-button"),
   dashboardView: document.querySelector("#dashboardView"),
   boardView: document.querySelector("#boardView"),
+  discoveryView: document.querySelector("#discoveryView"),
+  discoveryCount: document.querySelector("#discoveryCount"),
   todoView: document.querySelector("#todoView"),
   projectsView: document.querySelector("#projectsView"),
   scheduleView: document.querySelector("#scheduleView"),
@@ -323,6 +328,7 @@ function render() {
   renderTodayFocus();
   renderDashboard();
   renderBoard();
+  renderGitLabDiscovery();
   renderTodo();
   renderProjects();
   renderSchedule();
@@ -603,6 +609,16 @@ function boardStatusesForView(workflow, tasks, searchActive) {
 }
 
 function renderWorkflowTopControl() {
+  if (currentView() === "discovery") {
+    els.workflowTopSlot.innerHTML = `
+      <button class="secondary-button gitlab-discovery-button" data-discover-gitlab type="button" ${gitlabDiscoveryLoading ? "disabled" : ""}>
+        ${gitlabDiscoveryLoading ? "検索中..." : "GitLab から検索"}
+      </button>
+    `;
+    els.workflowTopSlot.querySelector("[data-discover-gitlab]")?.addEventListener("click", discoverGitLabIssues);
+    keepWorkflowMenuOpen = false;
+    return;
+  }
   if (currentView() !== "board") {
     els.workflowTopSlot.innerHTML = "";
     keepWorkflowMenuOpen = false;
@@ -703,6 +719,212 @@ function isGitLabRefreshCandidate(task) {
   return task.type === "issue"
     && task.status !== completedStatus
     && Boolean(parseGitLabIssueLink(task.link));
+}
+
+function renderGitLabDiscovery() {
+  const settings = normalizeGitLabDiscovery(state.gitlabDiscovery, state.members);
+  const existingKeys = collectedGitLabIssueKeys();
+  const ignoredKeys = new Set(settings.ignoredKeys);
+  const query = filters.search.toLowerCase();
+  const candidates = settings.items.filter((item) => (
+    !existingKeys.has(item.key)
+    && !ignoredKeys.has(item.key)
+    && (!query || gitLabDiscoverySearchText(item).includes(query))
+  ));
+  const configuredMembers = state.members.filter((member) => settings.memberUsernames[member]);
+  els.discoveryCount.textContent = String(candidates.length);
+  els.discoveryCount.hidden = candidates.length === 0;
+
+  const rows = candidates.map((item) => `
+    <tr>
+      <td><a class="table-link" href="${escapeHtml(item.webUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issueLabel(item.webUrl))}</a></td>
+      <td><strong>${escapeHtml(item.title)}</strong><div class="table-subtext">${escapeHtml(item.projectPath)}</div></td>
+      <td>${escapeHtml(gitLabAssigneeLabel({ assignees: item.assignees, assigneesSynced: true }))}</td>
+      <td>${escapeHtml(formatDateTime(item.updatedAt))}</td>
+      <td class="discovery-actions">
+        <button class="primary-button compact-button" data-collect-gitlab="${escapeHtml(item.key)}" type="button">収録</button>
+        <button class="tiny-button" data-ignore-gitlab="${escapeHtml(item.key)}" type="button">除外</button>
+      </td>
+    </tr>
+  `).join("");
+
+  els.discoveryView.innerHTML = `
+    <section class="discovery-settings">
+      <div>
+        <h3>GitLab Issue 検索</h3>
+        <p>Team の Git 担当が付いている opened Issue を、既存の3分類から探します。</p>
+      </div>
+      <div class="discovery-scope-list">
+        ${gitLabDiscoveryCategories.map((category) => `<span class="discovery-scope">${escapeHtml(category)} <b>${candidates.filter((item) => issueCategory(item.webUrl) === category).length}</b></span>`).join("")}
+      </div>
+      <div class="discovery-meta">
+        <span>GitLab: ${escapeHtml(gitLabDiscoveryOrigin(settings) || "既存 Issue URL から自動検出")}</span>
+        <span>GitLab ユーザー設定済み: ${configuredMembers.length}/${state.members.length} 人</span>
+        ${settings.lastCheckedAt ? `<span>最終検索: ${escapeHtml(formatDateTime(settings.lastCheckedAt))}</span>` : ""}
+        ${settings.ignoredKeys.length ? `<button class="table-link" data-reset-gitlab-ignored type="button">除外 ${settings.ignoredKeys.length} 件を戻す</button>` : ""}
+      </div>
+    </section>
+    <div class="section-title compact-section-title"><h3>待収録 Issue</h3><span class="tag">${candidates.length}</span></div>
+    ${rows
+      ? `<div class="discovery-table-wrap"><table class="list-table discovery-table"><thead><tr><th>Issue</th><th>タイトル / Project</th><th>Git担当</th><th>更新日時</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : emptyState(settings.lastCheckedAt ? "外結・開発・総合に未収録の opened Issue はありません" : "メンバーの GitLab ユーザー名を設定して検索してください")}
+  `;
+  wireGitLabDiscovery();
+}
+
+function wireGitLabDiscovery() {
+  els.discoveryView.querySelectorAll("[data-collect-gitlab]").forEach((button) => {
+    button.addEventListener("click", () => collectDiscoveredGitLabIssue(button.dataset.collectGitlab));
+  });
+  els.discoveryView.querySelectorAll("[data-ignore-gitlab]").forEach((button) => {
+    button.addEventListener("click", () => ignoreDiscoveredGitLabIssue(button.dataset.ignoreGitlab));
+  });
+  els.discoveryView.querySelector("[data-reset-gitlab-ignored]")?.addEventListener("click", () => {
+    markStateMutation("待収録 Issue の除外を解除");
+    state.gitlabDiscovery.ignoredKeys = [];
+    render();
+  });
+}
+
+async function discoverGitLabIssues() {
+  if (gitlabDiscoveryLoading) return;
+  const settings = normalizeGitLabDiscovery(state.gitlabDiscovery, state.members);
+  const origin = gitLabDiscoveryOrigin(settings);
+  if (!origin) {
+    showToast("GitLab URL を自動検出できません。先に3分類のいずれかの Issue URL を1件収録してください。", false);
+    return;
+  }
+  const teamUsernames = new Set(Object.values(settings.memberUsernames).map(normalizeGitLabUsername).filter(Boolean));
+  if (!teamUsernames.size) {
+    switchView("people");
+    showToast("先にメンバーの GitLab ユーザー名を設定してください。", false);
+    return;
+  }
+  const token = ensureGitLabToken();
+  if (!token) return;
+
+  gitlabDiscoveryLoading = true;
+  renderWorkflowTopControl();
+  showToast("GitLab の opened Issue を検索中...", false, { sticky: true });
+  try {
+    const issues = await fetchGitLabTeamOpenIssues(origin, teamUsernames, token);
+    const existingKeys = collectedGitLabIssueKeys();
+    const items = issues
+      .map(normalizeDiscoveredGitLabIssue)
+      .filter(Boolean)
+      .filter((item) => gitLabDiscoveryCategories.includes(issueCategory(item.webUrl)))
+      .filter((item) => item.assignees.some((assignee) => teamUsernames.has(normalizeGitLabUsername(assignee.username))))
+      .filter((item) => !existingKeys.has(item.key));
+    const uniqueItems = [...new Map(items.map((item) => [item.key, item])).values()]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    markStateMutation("GitLab の待収録 Issue を検索");
+    state.gitlabDiscovery.items = uniqueItems;
+    state.gitlabDiscovery.lastCheckedAt = new Date().toISOString();
+    showToast(`未収録の opened Issue が ${uniqueItems.length} 件見つかりました。`, false);
+  } catch (error) {
+    showToast(`GitLab Issue の検索に失敗しました: ${error?.message || "詳細不明"}`, false);
+  } finally {
+    gitlabDiscoveryLoading = false;
+    render();
+  }
+}
+
+async function fetchGitLabTeamOpenIssues(origin, usernames, token) {
+  const all = [];
+  for (const username of usernames) {
+    for (let page = 1; page <= 20; page += 1) {
+      const url = `${origin}/api/v4/issues?state=opened&scope=all&assignee_username[]=${encodeURIComponent(username)}&order_by=updated_at&sort=desc&per_page=100&page=${page}`;
+      const response = await fetch(url, { headers: { "PRIVATE-TOKEN": token } });
+      if (response.status === 401) {
+        localStorage.removeItem(gitlabTokenKey);
+        throw new Error("GitLab token が無効、または期限切れです。");
+      }
+      if (response.status === 403) throw new Error("GitLab token の権限が不足しています。");
+      if (!response.ok) throw new Error(`GitLab API ${response.status}`);
+      const pageItems = await response.json();
+      if (!Array.isArray(pageItems)) throw new Error("GitLab API の応答形式が不正です。");
+      all.push(...pageItems);
+      if (pageItems.length < 100) break;
+    }
+  }
+  return all;
+}
+
+function gitLabDiscoveryOrigin(settings = state.gitlabDiscovery) {
+  const configured = String(settings?.serverUrl || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+  for (const task of state.tasks) {
+    const parsed = task.type === "issue" ? parseGitLabIssueLink(task.link) : null;
+    if (parsed && gitLabDiscoveryCategories.includes(issueCategory(task.link))) return parsed.origin;
+  }
+  return "";
+}
+
+function normalizeDiscoveredGitLabIssue(issue) {
+  if (!issue || String(issue.state || "").toLowerCase() !== "opened") return null;
+  const webUrl = normalizeUrl(issue.web_url || issue.webUrl);
+  const parsed = parseGitLabIssueLink(webUrl);
+  if (!parsed) return null;
+  return {
+    key: gitLabIssueIdentity(webUrl),
+    iid: String(issue.iid || parsed.issueIid),
+    title: String(issue.title || "無題"),
+    webUrl,
+    projectPath: parsed.projectPath,
+    updatedAt: String(issue.updated_at || issue.updatedAt || ""),
+    assignees: normalizeGitLabAssignees(issue.assignees)
+  };
+}
+
+function gitLabIssueIdentity(link) {
+  const parsed = parseGitLabIssueLink(link);
+  return parsed ? `${parsed.origin}/${parsed.projectPath}#${parsed.issueIid}`.toLowerCase() : "";
+}
+
+function collectedGitLabIssueKeys() {
+  return new Set(state.tasks.filter((task) => task.type === "issue").map((task) => gitLabIssueIdentity(task.link)).filter(Boolean));
+}
+
+function gitLabDiscoverySearchText(item) {
+  return [item.iid, item.title, item.projectPath, ...item.assignees.flatMap((assignee) => [assignee.name, assignee.username])]
+    .filter(Boolean).join(" ").toLowerCase();
+}
+
+function collectDiscoveredGitLabIssue(key) {
+  const item = state.gitlabDiscovery.items.find((candidate) => candidate.key === key);
+  if (!item) return;
+  const usernameMap = state.gitlabDiscovery.memberUsernames;
+  const assigneeNames = new Set(item.assignees.map((assignee) => normalizeGitLabUsername(assignee.username)));
+  const owner = state.members.find((member) => assigneeNames.has(normalizeGitLabUsername(usernameMap[member]))) || state.members[0];
+  openTaskDialog("", {
+    type: "issue",
+    title: item.title,
+    project: item.projectPath,
+    owner,
+    status: state.workflow[0],
+    link: item.webUrl,
+    next: "対応内容を確認する。",
+    gitlab: {
+      state: "opened",
+      title: item.title,
+      updatedAt: item.updatedAt,
+      checkedAt: state.gitlabDiscovery.lastCheckedAt,
+      assignees: item.assignees,
+      assigneesSynced: true,
+      error: ""
+    }
+  });
+}
+
+function ignoreDiscoveredGitLabIssue(key) {
+  if (!key || state.gitlabDiscovery.ignoredKeys.includes(key)) return;
+  markStateMutation("待収録 Issue を除外");
+  state.gitlabDiscovery.ignoredKeys.push(key);
+  render();
+}
+
+function normalizeGitLabUsername(value) {
+  return String(value || "").trim().replace(/^@/, "").toLowerCase();
 }
 
 async function fetchGitLabIssueStatus(link, token, checkedAt) {
@@ -1488,6 +1710,7 @@ function formatGanttRange(start, end) {
 function renderPeople() {
   const memberSet = new Set(state.members.map(normalizeName));
   const selfMember = selfMemberName();
+  const gitlabSettings = normalizeGitLabDiscovery(state.gitlabDiscovery, state.members);
   const externalIssueGroups = groupBy(
     state.tasks.filter((task) => task.type === "issue" && !isDone(task) && !memberSet.has(normalizeName(task.owner))),
     "owner"
@@ -1529,7 +1752,8 @@ function renderPeople() {
     const isSelf = member === selfMember;
     return `
       <div class="member-row${isSelf ? " is-self" : ""}">
-        <input value="${escapeHtml(member)}" data-member-name="${index}" aria-label="メンバー名">
+        <label class="member-field"><span>表示名</span><input value="${escapeHtml(member)}" data-member-name="${index}" aria-label="メンバー名"></label>
+        <label class="member-field"><span>GitLab ユーザー名</span><input value="${escapeHtml(gitlabSettings.memberUsernames[member] || "")}" data-member-gitlab="${index}" placeholder="username" aria-label="GitLab ユーザー名"></label>
         <button class="self-member-button${isSelf ? " active" : ""}" data-self-member="${index}" type="button">${isSelf ? "自分" : "自分にする"}</button>
         <span class="tag">${assigned} 件</span>
         <button class="tiny-button" data-save-member="${index}" type="button">保存</button>
@@ -1551,6 +1775,7 @@ function renderPeople() {
       <div class="collapsible-body">
         <form id="memberForm" class="member-form">
           <input id="newMemberName" maxlength="24" placeholder="新しいメンバー名">
+          <input id="newMemberGitLab" maxlength="80" placeholder="GitLab ユーザー名（任意）">
           <button class="primary-button" type="submit">メンバー追加</button>
         </form>
         <div class="member-list">${memberRows}</div>
@@ -2770,14 +2995,16 @@ function wireMemberButtons() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const input = els.peopleView.querySelector("#newMemberName");
-    addMember(input.value);
+    const gitlabInput = els.peopleView.querySelector("#newMemberGitLab");
+    addMember(input.value, gitlabInput.value);
   });
 
   els.peopleView.querySelectorAll("[data-save-member]").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.saveMember);
       const input = els.peopleView.querySelector(`[data-member-name="${index}"]`);
-      renameMember(index, input.value);
+      const gitlabInput = els.peopleView.querySelector(`[data-member-gitlab="${index}"]`);
+      saveMemberDetails(index, input.value, gitlabInput.value);
     });
   });
 
@@ -2930,7 +3157,7 @@ function clearWorkflowDropIndicators() {
   els.workflowTopSlot.querySelector(".workflow-drop-placeholder")?.remove();
 }
 
-function addMember(rawName) {
+function addMember(rawName, rawGitLabUsername = "") {
   const name = normalizeName(rawName);
   if (!name) {
     alert("メンバー名を入力してください。");
@@ -2942,19 +3169,29 @@ function addMember(rawName) {
   }
   markStateMutation(`メンバー「${name}」を追加`);
   state.members.push(name);
+  state.gitlabDiscovery.memberUsernames[name] = normalizeGitLabUsername(rawGitLabUsername);
   render();
 }
 
-function renameMember(index, rawName) {
+function saveMemberDetails(index, rawName, rawGitLabUsername = "") {
   const oldName = state.members[index];
   const newName = normalizeName(rawName);
+  const newGitLabUsername = normalizeGitLabUsername(rawGitLabUsername);
+  const oldGitLabUsername = normalizeGitLabUsername(state.gitlabDiscovery.memberUsernames[oldName]);
   const wasSelf = oldName === selfMemberName();
   if (!oldName || !newName) {
     alert("メンバー名は空にできません。");
     renderPeople();
     return;
   }
-  if (oldName === newName) return;
+  if (oldName === newName && oldGitLabUsername === newGitLabUsername) return;
+
+  if (oldName === newName) {
+    markStateMutation(`「${newName}」の GitLab ユーザー名を変更`);
+    state.gitlabDiscovery.memberUsernames[newName] = newGitLabUsername;
+    render();
+    return;
+  }
 
   const existingIndex = state.members.findIndex((member) => member === newName);
   if (existingIndex >= 0 && existingIndex !== index) {
@@ -2964,6 +3201,8 @@ function renameMember(index, rawName) {
     const oldSetting = state.scheduling?.memberSettings?.[oldName];
     if (!state.scheduling.memberSettings[newName] && oldSetting) state.scheduling.memberSettings[newName] = oldSetting;
     delete state.scheduling.memberSettings[oldName];
+    delete state.gitlabDiscovery.memberUsernames[oldName];
+    state.gitlabDiscovery.memberUsernames[newName] = newGitLabUsername || state.gitlabDiscovery.memberUsernames[newName] || "";
     if (wasSelf) state.selfMember = newName;
   } else {
     markStateMutation(`メンバーを「${newName}」へ変更`);
@@ -2973,6 +3212,8 @@ function renameMember(index, rawName) {
       state.scheduling.memberSettings[newName] = state.scheduling.memberSettings[oldName];
       delete state.scheduling.memberSettings[oldName];
     }
+    delete state.gitlabDiscovery.memberUsernames[oldName];
+    state.gitlabDiscovery.memberUsernames[newName] = newGitLabUsername;
     if (wasSelf) state.selfMember = newName;
   }
   render();
@@ -2997,6 +3238,7 @@ function deleteMember(index) {
   markStateMutation(`メンバー「${member}」を削除`);
   state.members = state.members.filter((_, memberIndex) => memberIndex !== index);
   if (state.scheduling?.memberSettings) delete state.scheduling.memberSettings[member];
+  if (state.gitlabDiscovery?.memberUsernames) delete state.gitlabDiscovery.memberUsernames[member];
   if (state.selfMember === member) state.selfMember = selfMemberName();
   render();
 }
@@ -3117,6 +3359,7 @@ function switchView(view) {
   const titles = {
     dashboard: "作業概要",
     board: "Issue 看板",
+    discovery: "待収録 Issue",
     todo: "Todo",
     projects: "案件概要",
     schedule: "スケジュール・ガント",
@@ -3126,6 +3369,9 @@ function switchView(view) {
   document.querySelectorAll(".view").forEach((section) => section.classList.remove("active"));
   document.querySelector(`#${view}View`).classList.add("active");
   els.pageTitle.textContent = titles[view];
+  els.searchInput.placeholder = view === "discovery"
+    ? "待収録 Issue のタイトル、Project、Git担当を検索"
+    : "タスク、案件、担当者、次のアクションを検索";
   renderWorkflowTopControl();
   renderSearchAssist();
 }
@@ -3145,8 +3391,10 @@ function openTaskDialog(id, overrides = {}) {
   lastManualTaskTitleValue = els.taskTitle.value;
   els.taskProject.value = overrides.project || task?.project || (type === "todo" ? "Todo" : "Issue");
   els.taskOwner.value = overrides.owner || task?.owner || state.members[0];
-  els.taskGitAssignees.textContent = type === "issue" ? gitLabAssigneeLabel(task?.gitlab) : "—";
-  els.taskGitAssignees.className = `readonly-assignees${normalizeGitLabStatus(task?.gitlab)?.assigneesSynced ? "" : " unsynced"}`;
+  newTaskGitLabSeed = !task && type === "issue" ? normalizeGitLabStatus(overrides.gitlab) : null;
+  const dialogGitLab = task?.gitlab || newTaskGitLabSeed;
+  els.taskGitAssignees.textContent = type === "issue" ? gitLabAssigneeLabel(dialogGitLab) : "—";
+  els.taskGitAssignees.className = `readonly-assignees${normalizeGitLabStatus(dialogGitLab)?.assigneesSynced ? "" : " unsynced"}`;
   taskDialogPickerOpen = "";
   els.taskDue.value = overrides.due ?? task?.due ?? defaultDueForType(type);
   els.taskPriority.value = overrides.priority || task?.priority || "なし";
@@ -3577,6 +3825,7 @@ function openTodoDialogFromIssue(issue) {
 
 function closeTaskDialog() {
   els.dialog.close();
+  newTaskGitLabSeed = null;
 }
 
 function saveDraftAndClose() {
@@ -3640,7 +3889,9 @@ function saveTask(event) {
     completedAt,
     next: els.taskNext.value.trim(),
     link,
-    gitlab: type === "issue" && existingTask?.link === link ? normalizeGitLabStatus(existingTask.gitlab) : null,
+    gitlab: type === "issue"
+      ? (existingTask?.link === link ? normalizeGitLabStatus(existingTask.gitlab) : normalizeGitLabStatus(newTaskGitLabSeed))
+      : null,
     relatedIssues,
     quality,
     schedule,
@@ -3679,10 +3930,13 @@ function saveTask(event) {
 
 function hasDuplicateIssueLink(taskId, link) {
   const normalizedLink = normalizeTaskLinkInput(link, "issue");
+  const gitlabIdentity = gitLabIssueIdentity(normalizedLink);
   return state.tasks.some((task) => (
     task.type === "issue"
     && task.id !== taskId
-    && normalizeTaskLinkInput(task.link, "issue") === normalizedLink
+    && (gitlabIdentity
+      ? gitLabIssueIdentity(task.link) === gitlabIdentity
+      : normalizeTaskLinkInput(task.link, "issue") === normalizedLink)
   ));
 }
 
@@ -3909,7 +4163,7 @@ function matchesDueSearch(task, value) {
 
 function renderSearchAssist() {
   const criteria = parseSearchQuery(filters.search);
-  const showExamples = !criteria.length && document.activeElement === els.searchInput;
+  const showExamples = !criteria.length && document.activeElement === els.searchInput && currentView() !== "discovery";
   const ignoresSearch = ["projects", "people"].includes(currentView());
   els.searchAssist.hidden = !criteria.length && !showExamples;
   if (!criteria.length) {
@@ -3927,7 +4181,7 @@ function renderSearchAssist() {
     <span class="search-assist-label">検索条件</span>
     ${criteria.map((criterion) => `<span class="search-chip">${escapeHtml(criterion.label)}</span>`).join("")}
     <button class="search-clear" type="button">クリア</button>
-    <span class="search-count">${ignoresSearch ? "この画面は常に全件表示" : `${filteredTasks().length} 件`}</span>
+    <span class="search-count">${ignoresSearch ? "この画面は常に全件表示" : currentView() === "discovery" ? `${els.discoveryView.querySelectorAll("[data-collect-gitlab]").length} 件` : `${filteredTasks().length} 件`}</span>
   `;
   els.searchAssist.querySelector(".search-clear").addEventListener("click", clearSearch);
 }
@@ -4481,12 +4735,13 @@ function migrateState(rawState) {
     "待辦": "未対応"
   };
   const migrated = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     members: Array.isArray(rawState?.members) ? rawState.members : defaultMembers,
     workflow: Array.isArray(rawState?.workflow) && rawState.workflow.length ? rawState.workflow.map((step) => statusMap[step] || step) : defaultWorkflow,
     tasks: Array.isArray(rawState?.tasks) ? rawState.tasks : sampleTasks,
     selfMember: normalizeName(rawState?.selfMember) || selfMemberDefault,
-    scheduling: normalizeSchedulingSettings(rawState?.scheduling, Array.isArray(rawState?.members) ? rawState.members : defaultMembers)
+    scheduling: normalizeSchedulingSettings(rawState?.scheduling, Array.isArray(rawState?.members) ? rawState.members : defaultMembers),
+    gitlabDiscovery: normalizeGitLabDiscovery(rawState?.gitlabDiscovery, Array.isArray(rawState?.members) ? rawState.members : defaultMembers)
   };
   if (!migrated.members.includes(migrated.selfMember)) {
     migrated.selfMember = migrated.members.includes(selfMemberDefault) ? selfMemberDefault : migrated.members[0] || selfMemberDefault;
@@ -4580,6 +4835,30 @@ function migrateState(rawState) {
   ensureQueueOrders(migrated);
   recalculateSchedules(migrated);
   return migrated;
+}
+
+function normalizeGitLabDiscovery(value = {}, members = []) {
+  const raw = value && typeof value === "object" ? value : {};
+  const rawUsernames = raw.memberUsernames && typeof raw.memberUsernames === "object" ? raw.memberUsernames : {};
+  const memberUsernames = {};
+  members.map(normalizeName).filter(Boolean).forEach((member) => {
+    memberUsernames[member] = normalizeGitLabUsername(rawUsernames[member]);
+  });
+  const items = Array.isArray(raw.items)
+    ? raw.items.map((item) => normalizeDiscoveredGitLabIssue({
+      ...item,
+      state: "opened",
+      web_url: item?.webUrl,
+      updated_at: item?.updatedAt
+    })).filter(Boolean)
+    : [];
+  return {
+    serverUrl: String(raw.serverUrl || "").trim().replace(/\/$/, ""),
+    memberUsernames,
+    items: [...new Map(items.map((item) => [item.key, item])).values()],
+    ignoredKeys: [...new Set(Array.isArray(raw.ignoredKeys) ? raw.ignoredKeys.map(String).filter(Boolean) : [])],
+    lastCheckedAt: String(raw.lastCheckedAt || "")
+  };
 }
 
 function normalizeSchedulingSettings(value = {}, members = []) {
@@ -4974,6 +5253,11 @@ function issueLabel(value) {
   const number = extractIssueNumber(value);
   if (!number) return "";
   if (isBareIssueNumber(value)) return `#${number}`;
+  const category = issueCategory(value);
+  return `${category ? `${category} ` : ""}#${number}`;
+}
+
+function issueCategory(value) {
   const url = normalizeUrl(value).toLowerCase().replace("/-/work_items/", "/-/issues/");
   const categories = [
     { path: "/step3/external-test-issue/-/issues/", label: "外結" },
@@ -4983,7 +5267,7 @@ function issueLabel(value) {
     { path: "/001-sej/unit-integration-tests/step3/-/issues/", label: "単結" }
   ];
   const category = categories.find((item) => url.includes(item.path));
-  return `${category ? `${category.label} ` : ""}#${number}`;
+  return category?.label || "";
 }
 
 function issueTask(title, project, owner, due, status, priority, next, notes, quality = {}, relatedIssues = []) {
