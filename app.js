@@ -21,6 +21,7 @@ const databaseName = "task-manager-data";
 const databaseVersion = 1;
 const stateStoreName = "state";
 const recoveryStoreName = "recovery";
+const discoveryDemoEnabled = new URLSearchParams(window.location.search).get("demo") === "discovery";
 const maxUndoEntries = 30;
 const maxRecoveryPoints = 12;
 const capacityStatuses = ["未完了の全 Issue ステータス"];
@@ -66,6 +67,7 @@ const sampleTasks = [
 ];
 
 let state = migrateState(loadState());
+if (discoveryDemoEnabled) state = addGitLabDiscoveryDemoData(state);
 let dataFileHandle = null;
 let syncPollingTimer = null;
 let syncFileSnapshot = "";
@@ -936,17 +938,25 @@ async function fetchGitLabIssueStatus(link, token, checkedAt) {
   try {
     const controller = new AbortController();
     timeoutId = setTimeout(() => controller.abort(), 12000);
-    const response = await fetch(parsed.apiUrl, {
-      headers: token ? { "PRIVATE-TOKEN": token } : {},
-      signal: controller.signal
-    });
+    const apiCandidates = gitLabApiCandidates(parsed);
+    let response = null;
+    for (const [index, apiUrl] of apiCandidates.entries()) {
+      response = await fetch(apiUrl, {
+        headers: token ? { "PRIVATE-TOKEN": token } : {},
+        signal: controller.signal
+      });
+      const canTryLegacyIssueApi = index < apiCandidates.length - 1 && [403, 404].includes(response.status);
+      if (!canTryLegacyIssueApi) break;
+    }
     clearTimeout(timeoutId);
     if (response.status === 401) {
       localStorage.removeItem(gitlabTokenKey);
       return { state: "", updatedAt: "", checkedAt, error: "GitLab token が無効、または期限切れです。" };
     }
     if (response.status === 403) {
-      return { state: "", updatedAt: "", checkedAt, error: "GitLab token の権限が不足しています。" };
+      return { state: "", updatedAt: "", checkedAt, error: parsed.resourceType === "work_items"
+        ? "GitLab token に Work Item の読み取り権限（READ_WORK_ITEMS）がありません。"
+        : "GitLab token の権限が不足しています。" };
     }
     if (response.status === 404) {
       return { state: "", updatedAt: "", checkedAt, error: "GitLab project / issue / work item が見つからない、またはアクセス権がありません。" };
@@ -985,16 +995,25 @@ function parseGitLabIssueLink(link) {
     const resourceType = match[2].toLowerCase();
     const issueIid = match[3];
     const apiResourcePath = resourceType === "work_items" ? `-/work_items/${issueIid}` : `issues/${issueIid}`;
+    const issueApiUrl = `${url.origin}${parsedPath.basePath}/api/v4/projects/${encodeURIComponent(projectPath)}/issues/${issueIid}`;
     return {
       origin: `${url.origin}${parsedPath.basePath}`,
       projectPath,
       issueIid,
       resourceType,
-      apiUrl: `${url.origin}${parsedPath.basePath}/api/v4/projects/${encodeURIComponent(projectPath)}/${apiResourcePath}`
+      apiUrl: `${url.origin}${parsedPath.basePath}/api/v4/projects/${encodeURIComponent(projectPath)}/${apiResourcePath}`,
+      issueApiUrl
     };
   } catch {
     return null;
   }
+}
+
+function gitLabApiCandidates(parsed) {
+  if (!parsed?.apiUrl) return [];
+  return parsed.resourceType === "work_items" && parsed.issueApiUrl !== parsed.apiUrl
+    ? [parsed.apiUrl, parsed.issueApiUrl]
+    : [parsed.apiUrl];
 }
 
 function splitGitLabProjectPath(rawPath) {
@@ -1285,14 +1304,14 @@ function renderProjects() {
 }
 
 function renderSchedule() {
-  const dayCount = 42;
+  const dayCount = 21;
   const rangeStart = mondayOfWeek(addCalendarDays(todayOffset(0), ganttWeekOffset * 7));
   const days = Array.from({ length: dayCount }, (_, index) => addCalendarDays(rangeStart, index));
   const rangeEnd = days[days.length - 1];
   const visibleIds = new Set(filteredTasks().map((task) => task.id));
   const groups = state.members.map((member) => {
     const allIssues = state.tasks
-      .filter((task) => visibleIds.has(task.id) && task.type === "issue" && task.owner === member)
+      .filter((task) => visibleIds.has(task.id) && task.type === "issue" && task.owner === member && !isDone(task))
       .sort((a, b) => (a.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) - (b.schedule?.queueOrder ?? Number.MAX_SAFE_INTEGER) || sortByBoardOrder(a, b));
     const gantt = allIssues.filter((task) => {
       const schedule = normalizeTaskSchedule(task.schedule);
@@ -1302,17 +1321,22 @@ function renderSchedule() {
         && schedule.eta >= rangeStart
         && schedule.plannedStart <= rangeEnd;
     });
-    const displayOnly = allIssues.filter((task) => !gantt.includes(task));
-    return { member, gantt, displayOnly };
+    const unscheduled = allIssues.filter((task) => {
+      const schedule = normalizeTaskSchedule(task.schedule);
+      return !schedule.plannedStart || !schedule.eta;
+    });
+    const displayOnly = allIssues.filter((task) => !gantt.includes(task) && !unscheduled.includes(task));
+    return { member, gantt, displayOnly, unscheduled };
   });
   const ganttCount = groups.reduce((sum, group) => sum + group.gantt.length, 0);
   const displayOnlyCount = groups.reduce((sum, group) => sum + group.displayOnly.length, 0);
+  const unscheduledCount = groups.reduce((sum, group) => sum + group.unscheduled.length, 0);
 
   els.scheduleView.innerHTML = `
     <div class="gantt-toolbar">
       <div>
         <strong>${escapeHtml(formatGanttRange(rangeStart, rangeEnd))}</strong>
-        <span>${ganttCount} 件をガント表示${displayOnlyCount ? ` · 表示のみ ${displayOnlyCount}` : ""}</span>
+        <span>${ganttCount} 件をガント表示${displayOnlyCount ? ` · 範囲外 ${displayOnlyCount}` : ""}${unscheduledCount ? ` · スケジュール未設定 ${unscheduledCount}` : ""}</span>
       </div>
       <div class="gantt-actions">
         <button class="secondary-button" data-gantt-shift="-1" type="button">← 1週</button>
@@ -1373,12 +1397,19 @@ function ganttHeader(days) {
 function ganttMemberGroup(group, days, rangeStart, rangeEnd) {
   const rows = group.gantt.map((task) => ganttTaskRow(task, days, rangeStart, rangeEnd)).join("");
   const displayOnlyRows = group.displayOnly.map((task) => ganttDisplayOnlyTaskRow(task, days)).join("");
-  const displayOnlyText = group.displayOnly.length ? `${group.displayOnly.length} 件は表示のみ` : "";
+  const unscheduledRows = group.unscheduled.map((task) => ganttDisplayOnlyTaskRow(task, days)).join("");
+  const displayOnlyText = group.displayOnly.length ? `${group.displayOnly.length} 件は範囲外` : "";
+  const unscheduledGroup = group.unscheduled.length ? `
+    <details class="gantt-collapsible-group">
+      <summary class="gantt-collapsible-summary"><span>スケジュール未設定</span><strong>${group.unscheduled.length} 件</strong></summary>
+      ${unscheduledRows}
+    </details>
+  ` : "";
   return `
     <div class="gantt-member-row">
       <div class="gantt-member-label">${escapeHtml(group.member)}<span>${escapeHtml(displayOnlyText)}</span></div>
     </div>
-    ${rows}${displayOnlyRows}${rows || displayOnlyRows ? "" : `<div class="gantt-row gantt-empty-row"><div class="gantt-label">Issue はありません</div>${ganttBackgroundCells(days)}</div>`}
+    ${rows}${displayOnlyRows}${unscheduledGroup}${rows || displayOnlyRows || unscheduledGroup ? "" : `<div class="gantt-row gantt-empty-row"><div class="gantt-label">Issue はありません</div>${ganttBackgroundCells(days)}</div>`}
   `;
 }
 
@@ -4565,6 +4596,7 @@ async function initializeIndexedDb() {
     if (saved?.state?.tasks) {
       suppressHistoryCapture = true;
       state = migrateState(saved.state);
+      if (discoveryDemoEnabled) state = addGitLabDiscoveryDemoData(state);
       lastStateSnapshot = serializeState(state);
       render();
       suppressHistoryCapture = false;
@@ -4859,6 +4891,70 @@ function normalizeGitLabDiscovery(value = {}, members = []) {
     ignoredKeys: [...new Set(Array.isArray(raw.ignoredKeys) ? raw.ignoredKeys.map(String).filter(Boolean) : [])],
     lastCheckedAt: String(raw.lastCheckedAt || "")
   };
+}
+
+function addGitLabDiscoveryDemoData(targetState) {
+  const demoIssues = [
+    {
+      state: "opened",
+      iid: 745,
+      title: "異常終了後に再実行するとエラーになる",
+      web_url: "https://gitlab.example.com/step3/external-test-issue/-/issues/745",
+      updated_at: "2026-11-15T08:30:00.000Z",
+      assignees: [{ name: "Demo Self", username: "demo-self" }]
+    },
+    {
+      state: "opened",
+      iid: 318,
+      title: "管理画面の検索条件が保持されない",
+      web_url: "https://gitlab.example.com/001-sej/issue/-/issues/318",
+      updated_at: "2026-11-14T06:15:00.000Z",
+      assignees: [{ name: "Demo Member A", username: "demo-member-a" }]
+    },
+    {
+      state: "opened",
+      iid: 902,
+      title: "長時間運転後に通知が遅延する",
+      web_url: "https://gitlab.example.com/step3/integration-test-issue/-/issues/902",
+      updated_at: "2026-11-13T10:45:00.000Z",
+      assignees: [{ name: "Demo Member B", username: "demo-member-b" }]
+    },
+    {
+      state: "opened",
+      iid: 319,
+      title: "権限変更後にメニュー表示が更新されない",
+      web_url: "https://gitlab.example.com/001-sej/issue/-/issues/319",
+      updated_at: "2026-11-12T03:20:00.000Z",
+      assignees: [
+        { name: "Demo Self", username: "demo-self" },
+        { name: "Demo Member A", username: "demo-member-a" }
+      ]
+    },
+    {
+      state: "opened",
+      iid: 746,
+      title: "通信切断時のリトライ回数を確認する",
+      web_url: "https://gitlab.example.com/step3/external-test-issue/-/issues/746",
+      updated_at: "2026-11-11T01:05:00.000Z",
+      assignees: [{ name: "Demo Member B", username: "demo-member-b" }]
+    }
+  ].map(normalizeDiscoveredGitLabIssue).filter(Boolean);
+  const settings = normalizeGitLabDiscovery(targetState.gitlabDiscovery, targetState.members);
+  const items = new Map(settings.items.map((item) => [item.key, item]));
+  demoIssues.forEach((item) => items.set(item.key, item));
+  targetState.gitlabDiscovery = {
+    ...settings,
+    serverUrl: settings.serverUrl || "https://gitlab.example.com",
+    memberUsernames: {
+      ...settings.memberUsernames,
+      [targetState.members[0] || "自分"]: settings.memberUsernames[targetState.members[0] || "自分"] || "demo-self",
+      [targetState.members[1] || "メンバーA"]: settings.memberUsernames[targetState.members[1] || "メンバーA"] || "demo-member-a",
+      [targetState.members[2] || "メンバーB"]: settings.memberUsernames[targetState.members[2] || "メンバーB"] || "demo-member-b"
+    },
+    items: [...items.values()],
+    lastCheckedAt: new Date().toISOString()
+  };
+  return targetState;
 }
 
 function normalizeSchedulingSettings(value = {}, members = []) {

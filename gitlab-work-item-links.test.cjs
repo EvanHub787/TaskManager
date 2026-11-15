@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const source = readFileSync(`${__dirname}/app.js`, 'utf8');
 const names = [
   'parseGitLabIssueLink',
+  'gitLabApiCandidates',
   'gitLabIssueIdentity',
   'normalizeDiscoveredGitLabIssue',
   'normalizeGitLabUsername',
@@ -37,11 +38,21 @@ assert.equal(workItem.resourceType, 'work_items');
 assert.equal(workItem.projectPath, 'team/project');
 assert.equal(workItem.issueIid, '456');
 assert.equal(workItem.apiUrl, 'https://gitlab.example.com/api/v4/projects/team%2Fproject/-/work_items/456');
+assert.equal(workItem.issueApiUrl, 'https://gitlab.example.com/api/v4/projects/team%2Fproject/issues/456');
+assert.deepEqual(
+  Array.from(context.gitLabApiCandidates(workItem)),
+  [
+    'https://gitlab.example.com/api/v4/projects/team%2Fproject/-/work_items/456',
+    'https://gitlab.example.com/api/v4/projects/team%2Fproject/issues/456'
+  ]
+);
 
 const selfManaged = context.parseGitLabIssueLink('https://example.com/tec/gitlab/team/project/-/work_items/789/');
 assert.equal(selfManaged.origin, 'https://example.com/tec/gitlab');
 assert.equal(selfManaged.projectPath, 'team/project');
 assert.equal(selfManaged.apiUrl, 'https://example.com/tec/gitlab/api/v4/projects/team%2Fproject/-/work_items/789');
+assert.equal(selfManaged.issueApiUrl, 'https://example.com/tec/gitlab/api/v4/projects/team%2Fproject/issues/789');
+assert.deepEqual(Array.from(context.gitLabApiCandidates(legacy)), [legacy.apiUrl]);
 
 assert.equal(context.extractIssueNumber('https://gitlab.example.com/team/project/-/issues/123'), '123');
 assert.equal(context.extractIssueNumber('https://gitlab.example.com/team/project/-/work_items/456'), '456');

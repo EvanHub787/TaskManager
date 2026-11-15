@@ -620,6 +620,35 @@
   background: #fafafa;
 }
 
+.gantt-collapsible-group {
+  min-width: calc(250px + var(--gantt-days) * 34px);
+  border-bottom: 1px solid #edf1ee;
+  background: #fafafa;
+}
+
+.gantt-collapsible-summary {
+  position: sticky;
+  z-index: 5;
+  left: 0;
+  box-sizing: border-box;
+  width: 250px;
+  min-height: 44px;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gantt-collapsible-summary strong {
+  margin-left: 6px;
+  color: #b45309;
+}
+
+.gantt-collapsible-group[open] .gantt-collapsible-summary {
+  border-bottom: 1px solid #edf1ee;
+}
+
 @media (max-width: 760px) {
   .gantt-toolbar {
     align-items: flex-start;
@@ -636,8 +665,13 @@
   }
 
   .gantt-chart,
-  .gantt-member-row {
+  .gantt-member-row,
+  .gantt-collapsible-group {
     min-width: calc(190px + var(--gantt-days) * 32px);
+  }
+
+  .gantt-collapsible-summary {
+    width: 190px;
   }
 }
 

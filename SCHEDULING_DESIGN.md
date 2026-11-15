@@ -358,7 +358,7 @@ simulateInsertion({ issueId, candidateOwner, insertIndex, remainingEffortDays })
 
 不建议把负责人队列直接塞进现有 workflow 看板列，因为一个是“流程状态维度”，一个是“人员执行顺序维度”，混在一次拖拽中会产生歧义。
 
-成员页之外，第一版已增加独立的“スケジュール”甘特图视图：默认展示从本周开始的 6 周，按成员分组，以 Planned Start 到 ETA 绘制任务条；周末、日本祝日和当天分别着色，并支持按周前后移动。工数大于 0 且日期落在显示区间内的 Issue 绘制任务条；工数未设置、为 0 或不在显示区间的 Issue 以“表示のみ”行显示，可直接打开 Issue 编辑弹窗。Todo 不绘制 Capacity 任务条。
+成员页之外，第一版已增加独立的“スケジュール”甘特图视图：默认展示从本周开始的 3 周，按成员分组，以 Planned Start 到 ETA 绘制任务条；周末、日本祝日和当天分别着色，并支持按周前后移动。工数大于 0 且日期落在显示区间内的 Issue 绘制任务条；区间外的 Issue 以“表示のみ”行显示，未设定 Schedule 的 Issue 默认折叠并仅显示数量，展开后可查看全部。已完成的 Issue 不在甘特图页面显示，Todo 不绘制 Capacity 任务条。
 
 ### 7.2 Issue 编辑弹窗
 
