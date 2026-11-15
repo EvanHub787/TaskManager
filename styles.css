@@ -307,13 +307,14 @@
 }
 
 .gantt-chart {
+  width: 100%;
   min-width: calc(250px + var(--gantt-days) * 34px);
 }
 
 .gantt-row {
   position: relative;
   display: grid;
-  grid-template-columns: 250px repeat(var(--gantt-days), 34px);
+  grid-template-columns: 250px repeat(var(--gantt-days), minmax(34px, 1fr));
   min-height: 50px;
   border-bottom: 1px solid #edf1ee;
 }
@@ -661,7 +662,7 @@
   }
 
   .gantt-row {
-    grid-template-columns: 190px repeat(var(--gantt-days), 32px);
+    grid-template-columns: 190px repeat(var(--gantt-days), minmax(32px, 1fr));
   }
 
   .gantt-chart,
