@@ -14,48 +14,6 @@
 }
 
 /* Team scheduling */
-.schedule-overview-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.schedule-overview-head h3,
-.schedule-overview-head p {
-  margin: 0;
-}
-
-.schedule-overview-head p {
-  margin-top: 5px;
-  color: var(--muted, #6b7280);
-  font-size: 13px;
-}
-
-.schedule-member-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 16px;
-  margin-bottom: 22px;
-}
-
-.schedule-member-card {
-  min-width: 0;
-  padding: 16px;
-  border: 1px solid var(--line, #e5e7eb);
-  border-radius: 14px;
-  background: var(--panel, #fff);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
-}
-
-.schedule-member-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .schedule-member-name {
   font-size: 16px;
   font-weight: 700;
@@ -111,64 +69,38 @@
   font-size: 12px;
 }
 
-.schedule-queue {
-  display: grid;
-  gap: 8px;
-}
-
-.schedule-queue-row {
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr) auto;
+.member-queue-order {
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-}
-
-.queue-order-controls {
-  display: grid;
-  grid-template-columns: 24px 18px 18px;
-  align-items: center;
-  gap: 2px;
-}
-
-.queue-order-controls > span {
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 700;
-  text-align: center;
 }
 
-.queue-order-controls button {
-  padding: 1px;
-  border: 0;
-  background: transparent;
-  color: #64748b;
-  cursor: pointer;
+.member-queue-handle {
+  display: grid;
+  width: 32px;
+  height: 36px;
+  place-items: center;
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 21px;
+  touch-action: none;
+  user-select: none;
 }
 
-.queue-order-controls button:disabled {
-  opacity: 0.25;
-  cursor: default;
+.member-queue-handle:hover,
+.member-queue-handle:active {
+  background: var(--soft);
+  color: var(--accent);
 }
 
-.schedule-issue-main {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
+.member-queue-handle:active {
+  cursor: grabbing;
 }
 
-.schedule-issue-main strong,
-.schedule-issue-main span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.schedule-issue-main span,
 .schedule-dates span {
   margin-top: 3px;
   color: #64748b;
@@ -189,12 +121,6 @@
   color: #dc2626;
 }
 
-.schedule-empty {
-  padding: 20px 10px;
-  color: #94a3b8;
-  text-align: center;
-}
-
 .schedule-tag.risk,
 .schedule-tag.missing {
   background: #fee2e2;
@@ -206,26 +132,267 @@
   color: #64748b;
 }
 
+.member-issue-overview {
+  margin-bottom: 26px;
+}
+
+.member-issue-overview-head,
+.member-issue-card-head,
+.member-issue-row,
+.member-issue-badges {
+  display: flex;
+  align-items: center;
+}
+
+.member-issue-overview-head,
+.member-issue-card-head,
+.member-issue-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.member-issue-overview-head h3,
+.member-issue-overview-head p {
+  margin: 0;
+}
+
+.member-issue-overview-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.member-issue-overview-head {
+  flex-wrap: wrap;
+}
+
+.member-issue-overview-head p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.member-issue-filter {
+  display: inline-flex;
+  margin: 14px 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #edf1ee;
+}
+
+.member-issue-filter-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.member-issue-filter-button.active {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(27, 42, 35, .12);
+}
+
+.member-issue-filter-hint {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.member-issue-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.member-issue-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.member-issue-card-head {
+  min-height: 48px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.member-issue-schedule {
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.member-issue-list {
+  display: grid;
+}
+
+.member-issue-row {
+  min-width: 0;
+  padding: 11px 14px;
+  border-bottom: 1px solid #edf1ee;
+}
+
+.member-issue-row:last-child {
+  border-bottom: 0;
+}
+
+.member-issue-row.is-pending {
+  background: #fffaf0;
+}
+
+.member-issue-row.is-dragging {
+  opacity: .55;
+}
+
+.member-issue-row.drop-before {
+  box-shadow: inset 0 3px var(--accent);
+}
+
+.member-issue-row.drop-after {
+  box-shadow: inset 0 -3px var(--accent);
+}
+
+.member-issue-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.member-issue-description {
+  min-width: 0;
+}
+
+.member-issue-row-side {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.member-issue-row-title {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 7px;
+}
+
+.member-issue-title {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.member-issue-title:hover,
+a.member-issue-number:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.member-issue-number {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.member-issue-number.is-static {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.member-issue-row-meta {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-issue-badges {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.member-issue-badge {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.member-issue-badge.git {
+  background: #e6eff8;
+  color: #315f87;
+}
+
+.member-issue-badge.management {
+  background: var(--soft);
+  color: var(--accent);
+}
+
+.member-issue-badge.pending {
+  background: #fff0c7;
+  color: #8a5a08;
+}
+
+.member-issue-empty {
+  padding: 22px 14px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
 .schedule-section input[readonly] {
   color: #475569;
   background: #f8fafc;
 }
 
 @media (max-width: 760px) {
-  .schedule-member-grid {
-    grid-template-columns: 1fr;
+  .member-issue-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .member-issue-badges {
+    justify-content: flex-start;
   }
 
   .schedule-stats {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .schedule-queue-row {
-    grid-template-columns: 54px minmax(0, 1fr);
-  }
-
   .schedule-dates {
-    grid-column: 2;
     text-align: left;
   }
 }

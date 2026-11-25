@@ -14,14 +14,16 @@ const qualityAnalysisStatusOptions = ["未確認", "記載完了"];
 const relatedIssueTypes = ["主Issue", "関連Issue", "横展開", "同根因"];
 const gitLabDiscoveryCategories = ["外結", "開発", "総合"];
 const selfMemberDefault = "自分";
-const storageKey = "follow-manager-v1";
-const historyKey = "follow-manager-history-v1";
-const gitlabTokenKey = "task-manager-gitlab-token";
-const databaseName = "task-manager-data";
+const pageParams = new URLSearchParams(window.location.search);
+const discoveryDemoEnabled = pageParams.get("demo") === "discovery";
+const storageSuffix = discoveryDemoEnabled ? "-discovery-demo" : "";
+const storageKey = `follow-manager-v1${storageSuffix}`;
+const historyKey = `follow-manager-history-v1${storageSuffix}`;
+const gitlabTokenKey = `task-manager-gitlab-token${storageSuffix}`;
+const databaseName = `task-manager-data${storageSuffix}`;
 const databaseVersion = 1;
 const stateStoreName = "state";
 const recoveryStoreName = "recovery";
-const discoveryDemoEnabled = new URLSearchParams(window.location.search).get("demo") === "discovery";
 const maxUndoEntries = 30;
 const maxRecoveryPoints = 12;
 const capacityStatuses = ["未完了の全 Issue ステータス"];
@@ -67,7 +69,6 @@ const sampleTasks = [
 ];
 
 let state = migrateState(loadState());
-if (discoveryDemoEnabled) state = addGitLabDiscoveryDemoData(state);
 let dataFileHandle = null;
 let syncPollingTimer = null;
 let syncFileSnapshot = "";
@@ -83,7 +84,6 @@ let filters = {
 };
 let dashboardStatFilter = "";
 let pendingDoneTaskId = "";
-let pendingConvertTaskId = "";
 let showAllTodoDone = false;
 let ownerPickerTaskId = "";
 let projectPickerTaskId = "";
@@ -110,6 +110,7 @@ let ganttWeekOffset = 0;
 let suppressScheduleClickUntil = 0;
 let taskDialogBackdropPointerId = null;
 let taskDialogPickerOpen = "";
+let memberIssueAssignmentFilter = "all";
 
 const els = {
   pageTitle: document.querySelector("#pageTitle"),
@@ -144,7 +145,6 @@ const els = {
   dialogTitle: document.querySelector("#dialogTitle"),
   taskId: document.querySelector("#taskId"),
   taskType: document.querySelector("#taskType"),
-  taskTypePicker: document.querySelector("#taskTypePicker"),
   taskTitle: document.querySelector("#taskTitle"),
   taskProject: document.querySelector("#taskProject"),
   taskProjectPicker: document.querySelector("#taskProjectPicker"),
@@ -226,6 +226,7 @@ async function bootstrap() {
   render();
   suppressHistoryCapture = false;
   await initializeIndexedDb();
+  if (discoveryDemoEnabled || pageParams.get("view") === "people") switchView("people");
   updateStorageUsage();
   updateSyncStatus("synced");
 }
@@ -1608,7 +1609,7 @@ function wireGanttDragAndDrop() {
         item.style.removeProperty("--gantt-queue-shift");
       });
       if (drag.moved) suppressScheduleClickUntil = Date.now() + 450;
-      if (!cancelled && drag.moved && drag.target) moveGanttQueueTask(drag.taskId, drag.target.dataset.ganttTaskRow, drag.after);
+      if (!cancelled && drag.moved && drag.target) moveQueueTask(drag.taskId, drag.target.dataset.ganttTaskRow, drag.after);
     };
     handle.addEventListener("pointerup", finishQueueDrag);
     handle.addEventListener("pointercancel", (event) => finishQueueDrag(event, true));
@@ -1696,7 +1697,8 @@ function updateGanttDateDrag(drag, rangeStart) {
   drag.bar.querySelector(".gantt-drag-date").textContent = `開始 ${drag.previewStart}`;
 }
 
-function moveGanttQueueTask(taskId, targetId, after) {
+function moveQueueTask(taskId, targetId, after) {
+  if (taskId === targetId) return;
   const task = state.tasks.find((item) => item.id === taskId);
   const target = state.tasks.find((item) => item.id === targetId);
   if (!task || !target || task.owner !== target.owner || !isCapacityIssue(task) || !isCapacityIssue(target)) return;
@@ -1706,7 +1708,9 @@ function moveGanttQueueTask(taskId, targetId, after) {
   const fromIndex = queue.findIndex((item) => item.id === taskId);
   queue.splice(fromIndex, 1);
   const targetIndex = queue.findIndex((item) => item.id === targetId);
-  queue.splice(targetIndex + (after ? 1 : 0), 0, task);
+  const destinationIndex = targetIndex + (after ? 1 : 0);
+  if (destinationIndex === fromIndex) return;
+  queue.splice(destinationIndex, 0, task);
   queue.forEach((item, index) => {
     item.schedule = { ...normalizeTaskSchedule(item.schedule), queueOrder: index };
   });
@@ -1793,14 +1797,10 @@ function renderPeople() {
     `;
   }).join("");
 
-  const schedulePanels = state.members.map((member) => scheduleMemberPanel(member, member === selfMember)).join("");
+  const memberIssueOverview = renderMemberIssueOverview(gitlabSettings, selfMember);
 
   els.peopleView.innerHTML = `
-    <div class="schedule-overview-head">
-      <div><h3>メンバー Queue</h3><p>工数は 0.5 人日単位、1 人日 = 8 時間。調査中・修正中・テスト中を直列でスケジュールします。</p></div>
-      <span class="tag">日本祝日対応 ～ ${escapeHtml(japaneseHolidayCoveredThrough)}</span>
-    </div>
-    <div class="schedule-member-grid">${schedulePanels}</div>
+    ${memberIssueOverview}
     <details class="member-panel collapsible-panel">
       <summary>メンバー編集</summary>
       <div class="collapsible-body">
@@ -1817,55 +1817,168 @@ function renderPeople() {
   wireMemberButtons();
 }
 
-function scheduleMemberPanel(member, isSelf) {
+function renderMemberIssueOverview(gitlabSettings, selfMember) {
+  const pendingItems = pendingGitLabDiscoveryItems(gitlabSettings);
+  const memberGroups = state.members.map((member) => ({
+    member,
+    entries: memberIssueEntries(member, gitlabSettings, pendingItems)
+  })).sort((a, b) => Number(a.entries.length === 0) - Number(b.entries.length === 0));
+  const visibleCount = memberGroups.reduce((sum, group) => sum + group.entries.length, 0);
+  const filterOptions = [
+    { value: "git", label: "Git担当 Issue" },
+    { value: "management", label: "管理担当 Issue" },
+    { value: "all", label: "すべて" }
+  ];
+
+  return `
+    <section class="member-issue-overview">
+      <div class="member-issue-overview-head">
+        <div><h3>メンバー別 Issue</h3><p>管理担当の Issue は Queue 順に表示します。工数は 0.5 人日単位（1 人日 = 8 時間）です。</p></div>
+        <div class="member-issue-overview-actions">
+          <span class="tag">${visibleCount} 担当</span>
+          ${discoveryDemoEnabled
+            ? '<a class="table-link" href="?view=people">通常のデータに戻る</a>'
+            : ""}
+        </div>
+      </div>
+      <div class="member-issue-filter" role="group" aria-label="担当区分で Issue を絞り込む">
+        ${filterOptions.map((option) => `<button class="member-issue-filter-button${memberIssueAssignmentFilter === option.value ? " active" : ""}" data-member-issue-filter="${option.value}" type="button" aria-pressed="${memberIssueAssignmentFilter === option.value}">${option.label}</button>`).join("")}
+      </div>
+      ${memberIssueAssignmentFilter === "git" ? '<p class="member-issue-filter-hint">Queue 順を変更するには「管理担当 Issue」または「すべて」に切り替えてください。</p>' : ""}
+      <div class="member-issue-grid">
+        ${memberGroups.map((group) => memberIssueCard(group.member, group.entries, group.member === selfMember)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function pendingGitLabDiscoveryItems(settings = normalizeGitLabDiscovery(state.gitlabDiscovery, state.members)) {
+  const existingKeys = collectedGitLabIssueKeys();
+  const ignoredKeys = new Set(settings.ignoredKeys);
+  return settings.items.filter((item) => !existingKeys.has(item.key) && !ignoredKeys.has(item.key));
+}
+
+function memberIssueEntries(member, gitlabSettings, pendingItems) {
+  const collected = state.tasks
+    .filter((task) => task.type === "issue" && !isDone(task))
+    .map((task) => {
+      const assignments = memberIssueAssignmentKinds(task, member, gitlabSettings);
+      return { source: "task", task, assignments };
+    })
+    .filter((entry) => memberIssueEntryMatchesFilter(entry.assignments))
+    .sort((a, b) => sortByUrgency(a.task, b.task));
+  const pending = pendingItems
+    .map((item) => {
+      const assignments = memberIssueAssignmentKinds(item, member, gitlabSettings, true);
+      return { source: "pending", item, assignments };
+    })
+    .filter((entry) => memberIssueEntryMatchesFilter(entry.assignments))
+    .sort((a, b) => String(b.item.updatedAt).localeCompare(String(a.item.updatedAt)));
+  return [...collected, ...pending];
+}
+
+function memberIssueAssignmentKinds(issue, member, gitlabSettings, pending = false) {
+  const configuredUsername = normalizeGitLabUsername(gitlabSettings?.memberUsernames?.[member]);
+  const assignees = normalizeGitLabAssignees(pending ? issue?.assignees : issue?.gitlab?.assignees);
+  return {
+    management: !pending && normalizeName(issue?.owner) === normalizeName(member),
+    git: Boolean(configuredUsername) && assignees.some((assignee) => normalizeGitLabUsername(assignee.username) === configuredUsername)
+  };
+}
+
+function memberIssueEntryMatchesFilter(assignments) {
+  if (memberIssueAssignmentFilter === "git") return assignments.git;
+  if (memberIssueAssignmentFilter === "management") return assignments.management;
+  return assignments.git || assignments.management;
+}
+
+function memberIssueCard(member, entries, isSelf) {
   const summary = ownerScheduleSummary(member);
   const capacity = state.scheduling.memberSettings[member]?.dailyCapacityDays ?? 1;
-  const mrInQueue = state.tasks.filter((task) => isCapacityIssue(task) && task.owner === member && task.status === "MR").length;
-  const rows = summary.queue.length
-    ? summary.queue.map((task, index) => scheduleQueueRow(task, index, summary.queue.length)).join("")
-    : `<div class="schedule-empty">スケジュール対象の Issue はありません</div>`;
+  const mrInQueue = summary.queue.filter((task) => task.status === "MR").length;
+  const queuePositions = new Map(summary.queue.map((task, index) => [task.id, index]));
+  const visibleQueue = [];
+  const otherEntries = [];
+  for (const entry of entries) {
+    const position = queuePositions.get(entry.task?.id);
+    if (position === undefined) otherEntries.push(entry);
+    else visibleQueue.push({ entry, position });
+  }
+  visibleQueue.sort((a, b) => a.position - b.position);
+  const rows = entries.length
+    ? visibleQueue.map(({ entry, position }) => memberIssueRow(entry, position)).join("")
+      + otherEntries.map((entry) => memberIssueRow(entry)).join("")
+    : `<div class="member-issue-empty">この条件の Issue はありません</div>`;
   return `
-    <section class="schedule-member-card">
-      <div class="schedule-member-head">
-        <div><button class="table-link schedule-member-name" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button>${isSelf ? `<span class="self-member-badge">自分</span>` : ""}</div>
+    <section class="member-issue-card">
+      <div class="member-issue-card-head">
+        <div><button class="table-link schedule-member-name" data-filter-member="${escapeHtml(member)}" type="button">${escapeHtml(member)}</button>${isSelf ? `<span class="self-member-badge">自分</span>` : ""} <span class="tag">${entries.length} 件</span></div>
         <label class="capacity-control">1日 Capacity
           <select data-member-capacity="${escapeHtml(member)}">
             ${[0, 0.5, 1].map((value) => `<option value="${value}"${capacity === value ? " selected" : ""}>${value} 人日</option>`).join("")}
           </select>
         </label>
       </div>
-      <div class="schedule-stats">
-        <span><strong>${formatPersonDays(summary.totalEffort)}</strong>残り工数</span>
-        <span><strong>${summary.queueEndDate || "—"}</strong>Queue 終了</span>
-        <span><strong>${formatPersonDays(summary.weeklyRemaining)}</strong>今週残り</span>
-        <span><strong>${mrInQueue}</strong>MR 対応</span>
+      <div class="member-issue-schedule" aria-label="管理担当 Queue 集計">
+        <div class="schedule-stats">
+          <span><strong>${formatPersonDays(summary.totalEffort)}</strong>残り工数</span>
+          <span><strong>${summary.queueEndDate || "—"}</strong>Queue 終了</span>
+          <span><strong>${formatPersonDays(summary.weeklyRemaining)}</strong>今週残り</span>
+          <span><strong>${mrInQueue}</strong>MR 対応</span>
+        </div>
+        ${summary.missingEffort ? `<div class="schedule-warning">${summary.missingEffort} 件の工数が未設定です</div>` : ""}
       </div>
-      ${summary.missingEffort ? `<div class="schedule-warning">${summary.missingEffort} 件の工数が未設定です</div>` : ""}
-      <div class="schedule-queue">${rows}</div>
+      <div class="member-issue-list">${rows}</div>
     </section>
   `;
 }
 
-function scheduleQueueRow(task, index, length) {
-  const schedule = normalizeTaskSchedule(task.schedule);
-  const risk = schedule.eta && task.due && schedule.eta > task.due;
+function memberIssueRow(entry, position) {
+  const pending = entry.source === "pending";
+  const issue = pending ? entry.item : entry.task;
+  const link = pending ? issue.webUrl : issue.link;
+  const schedule = position === undefined ? null : normalizeTaskSchedule(issue.schedule);
+  const risk = schedule?.eta && issue.due && schedule.eta > issue.due;
+  const canReorder = schedule && memberIssueAssignmentFilter !== "git";
+  const issueNumbers = issueReferences(link).map(({ url, label }) => url
+    ? `<a class="member-issue-number" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" draggable="false">${escapeHtml(label)}</a>`
+    : `<span class="member-issue-number is-static">${escapeHtml(label)}</span>`).join("");
+  const title = pending
+    ? `<a class="member-issue-title" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer" draggable="false">${escapeHtml(issue.title)}</a>`
+    : `<button class="member-issue-title" data-title-edit="${escapeHtml(issue.id)}" type="button">${escapeHtml(issue.title)}</button>`;
+  const effort = schedule?.remainingEffortDays === null ? "工数未設定" : formatPersonDays(schedule?.remainingEffortDays);
+  const meta = pending
+    ? `${issue.projectPath || "GitLab"}${issue.updatedAt ? ` · 更新 ${formatDateTime(issue.updatedAt)}` : ""}`
+    : `${issue.project || "Issue"} · ${issue.status} · ${schedule ? effort : formatDue(issue.due)}`;
   return `
-    <div class="schedule-queue-row">
-      <div class="queue-order-controls">
-        <span>${index + 1}</span>
-        <button data-queue-move="up" data-queue-task="${task.id}" type="button" ${index === 0 ? "disabled" : ""} aria-label="上へ">↑</button>
-        <button data-queue-move="down" data-queue-task="${task.id}" type="button" ${index === length - 1 ? "disabled" : ""} aria-label="下へ">↓</button>
+    <article class="member-issue-row${pending ? " is-pending" : ""}"${canReorder ? ` data-member-queue-row="${escapeHtml(issue.id)}"` : ""}>
+      <div class="member-issue-row-main">
+        ${canReorder ? `
+          <div class="member-queue-order">
+            <span class="member-queue-handle" data-member-queue-handle title="ドラッグして Queue 順を変更" aria-label="ドラッグして Queue 順を変更">⠿</span>
+            <span>${position + 1}</span>
+          </div>
+        ` : ""}
+        <div class="member-issue-description">
+          <div class="member-issue-row-title">${issueNumbers}${title}</div>
+          <div class="member-issue-row-meta">${escapeHtml(meta)}</div>
+        </div>
       </div>
-      <button class="schedule-issue-main" data-title-edit="${task.id}" type="button">
-        <strong>${escapeHtml(task.title)}</strong>
-        <span>${escapeHtml(task.status)} · ${schedule.remainingEffortDays === null ? "工数未設定" : formatPersonDays(schedule.remainingEffortDays)}</span>
-      </button>
-      <div class="schedule-dates${risk ? " is-risk" : ""}">
-        <span>開始 ${schedule.plannedStart || "—"}</span>
-        <strong>ETA ${schedule.eta || "—"}</strong>
-        <span>期限 ${task.due || "—"}</span>
+      <div class="member-issue-row-side">
+        <div class="member-issue-badges">
+          ${entry.assignments.git ? `<span class="member-issue-badge git">Git担当</span>` : ""}
+          ${entry.assignments.management ? `<span class="member-issue-badge management">管理担当</span>` : ""}
+          ${pending ? `<span class="member-issue-badge pending">待収録</span><button class="tiny-button" data-collect-gitlab="${escapeHtml(issue.key)}" type="button">収録</button>` : ""}
+        </div>
+        ${schedule ? `
+          <div class="schedule-dates${risk ? " is-risk" : ""}">
+            <span>開始 ${escapeHtml(schedule.plannedStart || "—")}</span>
+            <strong>ETA ${escapeHtml(schedule.eta || "—")}</strong>
+            <span>期限 ${escapeHtml(issue.due || "—")}</span>
+          </div>
+        ` : ""}
       </div>
-    </div>
+    </article>
   `;
 }
 
@@ -2154,10 +2267,6 @@ function taskCard(task, enableDrag = false) {
   const canFinish = !isDone(task);
   const issueBadge = issueBadges(task, "issue-number");
   const title = `<button class="task-title-button" data-title-edit="${task.id}" type="button">${escapeHtml(task.title)}</button>`;
-  const canConvert = task.type === "todo" && !task.linkedIssueId && task.status !== todoDoneStatus;
-  const convertButton = pendingConvertTaskId === task.id
-    ? `<button class="tiny-button confirm-button" data-convert="${task.id}" type="button">確認</button>`
-    : `<button class="tiny-button" data-convert="${task.id}" type="button">Issue 化</button>`;
   const doneButton = pendingDoneTaskId === task.id
     ? `<button class="tiny-button confirm-button" data-done="${task.id}" type="button">確認</button>`
     : `<button class="tiny-button" data-done="${task.id}" type="button">完了</button>`;
@@ -2185,7 +2294,6 @@ function taskCard(task, enableDrag = false) {
         ${priorityControl}
         ${task.type === "issue" ? scheduleBadge(task) : ""}
         <span class="tag-spacer"></span>
-        ${canConvert ? convertButton : ""}
         ${canFinish ? doneButton : ""}
       </div>
     </article>
@@ -2274,7 +2382,6 @@ function taskDialogPickerConfig(field) {
   const type = els.taskType.value || "issue";
   const projects = [...new Set([...state.tasks.map((item) => item.project), els.taskProject.value, type === "todo" ? "Todo" : "Issue"].filter(Boolean))].sort();
   const configs = {
-    taskType: { options: ["issue", "todo"], labels: { issue: "Issue", todo: "Todo" } },
     taskProject: { options: projects, allowCustom: true, placeholder: "案件名", listId: "projectList", maxLength: 60 },
     taskOwner: { options: ownerCandidates(), allowCustom: true, placeholder: "担当者名", listId: "ownerList", maxLength: 60 },
     taskStatus: { options: type === "todo" ? [todoOpenStatus, todoDoneStatus] : [...state.workflow, completedStatus] },
@@ -2290,7 +2397,7 @@ function taskDialogPickerConfig(field) {
 }
 
 function renderTaskDialogPickers() {
-  ["taskType", "taskProject", "taskOwner", "taskStatus", "taskPriority", "qualityAnalysisStatus", "qualityRouteType", "qualityScope", "qualityReproducibility", "qualityExternalDependency", "qualityDiscoveryPhase"].forEach((field) => {
+  ["taskProject", "taskOwner", "taskStatus", "taskPriority", "qualityAnalysisStatus", "qualityRouteType", "qualityScope", "qualityReproducibility", "qualityExternalDependency", "qualityDiscoveryPhase"].forEach((field) => {
     const container = els[`${field}Picker`];
     const config = taskDialogPickerConfig(field);
     if (!container || !config) return;
@@ -2349,17 +2456,7 @@ function setTaskDialogPickerValue(field, value) {
   if (!config || (config.allowCustom && !normalized) || (!config.allowCustom && !config.options.includes(normalized))) return;
   els[field].value = normalized;
   taskDialogPickerOpen = "";
-  if (field === "taskType") {
-    if (!els.taskId.value) els.taskDue.value = defaultDueForType(normalized);
-    if (normalized === "todo") clearAutoFilledIssueTitle();
-    fillStatusSelect(normalized);
-    syncIssueLinkRequirement();
-    syncCompletedAtField();
-    syncTaskNextLabel();
-    syncRecurrenceField();
-    syncQualityAnalysisSection();
-    syncScheduleSection();
-  } else if (field === "taskStatus") {
+  if (field === "taskStatus") {
     syncCompletedAtField();
   }
   renderTaskDialogPickers();
@@ -2405,7 +2502,6 @@ function wireTaskButtons(root) {
       nextEditorTaskId = "";
       priorityPickerTaskId = "";
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       render();
     });
   });
@@ -2424,7 +2520,6 @@ function wireTaskButtons(root) {
       nextEditorTaskId = "";
       priorityPickerTaskId = "";
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       render();
       requestAnimationFrame(() => {
         const input = document.querySelector(`[data-project-input="${CSS.escape(projectPickerTaskId)}"]`);
@@ -2447,7 +2542,6 @@ function wireTaskButtons(root) {
       nextEditorTaskId = "";
       priorityPickerTaskId = "";
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       render();
       if (duePickerTaskId) {
         requestAnimationFrame(() => {
@@ -2487,7 +2581,6 @@ function wireTaskButtons(root) {
       duePickerTaskId = "";
       priorityPickerTaskId = "";
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       render();
       requestAnimationFrame(() => {
         const textarea = document.querySelector(`[data-next-editor="${CSS.escape(nextEditorTaskId)}"]`);
@@ -2592,7 +2685,6 @@ function wireTaskButtons(root) {
       duePickerTaskId = "";
       nextEditorTaskId = "";
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       render();
     });
   });
@@ -2606,7 +2698,6 @@ function wireTaskButtons(root) {
       updateTask(taskId, { priority }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の Rank を変更`);
       priorityPickerTaskId = "";
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       render();
     });
   });
@@ -2632,7 +2723,6 @@ function wireTaskButtons(root) {
       if (!task) return;
       if (pendingDoneTaskId !== task.id) {
         pendingDoneTaskId = task.id;
-        pendingConvertTaskId = "";
         render();
         return;
       }
@@ -2649,26 +2739,11 @@ function wireTaskButtons(root) {
       const task = state.tasks.find((item) => item.id === button.dataset.reopenTodo);
       if (!task || task.type !== "todo" || !isDone(task)) return;
       pendingDoneTaskId = "";
-      pendingConvertTaskId = "";
       updateTask(task.id, {
         status: todoOpenStatus,
         completedAt: ""
       });
       render();
-    });
-  });
-  root.querySelectorAll("[data-convert]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const task = state.tasks.find((item) => item.id === button.dataset.convert);
-      if (!task) return;
-      if (pendingConvertTaskId !== task.id) {
-        pendingConvertTaskId = task.id;
-        pendingDoneTaskId = "";
-        render();
-        return;
-      }
-      pendingConvertTaskId = "";
-      openTaskDialog(task.id, { type: "issue", status: state.workflow[0], project: "Issue" });
     });
   });
 }
@@ -3059,8 +3134,17 @@ function wireMemberButtons() {
     select.addEventListener("change", () => updateMemberCapacity(select.dataset.memberCapacity, Number(select.value)));
   });
 
-  els.peopleView.querySelectorAll("[data-queue-move]").forEach((button) => {
-    button.addEventListener("click", () => moveOwnerQueueTask(button.dataset.queueTask, button.dataset.queueMove));
+  wireMemberQueueDrag();
+
+  els.peopleView.querySelectorAll("[data-member-issue-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      memberIssueAssignmentFilter = button.dataset.memberIssueFilter;
+      renderPeople();
+    });
+  });
+
+  els.peopleView.querySelectorAll("[data-collect-gitlab]").forEach((button) => {
+    button.addEventListener("click", () => collectDiscoveredGitLabIssue(button.dataset.collectGitlab));
   });
 }
 
@@ -3074,21 +3158,50 @@ function updateMemberCapacity(member, value) {
   render();
 }
 
-function moveOwnerQueueTask(taskId, direction) {
-  const task = state.tasks.find((item) => item.id === taskId);
-  if (!task || !isCapacityIssue(task)) return;
-  const queue = state.tasks
-    .filter((item) => item.owner === task.owner && isCapacityIssue(item))
-    .sort((a, b) => (a.schedule?.queueOrder ?? 0) - (b.schedule?.queueOrder ?? 0));
-  const fromIndex = queue.findIndex((item) => item.id === taskId);
-  const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
-  if (fromIndex < 0 || toIndex < 0 || toIndex >= queue.length) return;
-  markStateMutation(`「${task.owner}」の Issue Queue を変更`);
-  [queue[fromIndex], queue[toIndex]] = [queue[toIndex], queue[fromIndex]];
-  queue.forEach((item, index) => {
-    item.schedule = { ...normalizeTaskSchedule(item.schedule), queueOrder: index };
+function wireMemberQueueDrag() {
+  let drag = null;
+  els.peopleView.querySelectorAll("[data-member-queue-handle]").forEach((handle) => {
+    const row = handle.closest("[data-member-queue-row]");
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || drag) return;
+      handle.setPointerCapture(event.pointerId);
+      drag = { handle, row, pointerId: event.pointerId, startY: event.clientY, moved: false };
+      event.preventDefault();
+    });
+
+    const updateTarget = (event) => {
+      drag.target?.classList.remove("drop-before", "drop-after");
+      drag.target = null;
+      drag.moved ||= Math.abs(event.clientY - drag.startY) > 4;
+      if (!drag.moved) return;
+      row.classList.add("is-dragging");
+
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-member-queue-row]");
+      if (!target || target === row || target.parentElement !== row.parentElement) return;
+      const bounds = target.getBoundingClientRect();
+      drag.target = target;
+      drag.after = event.clientY >= bounds.top + bounds.height / 2;
+      target.classList.add(drag.after ? "drop-after" : "drop-before");
+    };
+
+    handle.addEventListener("pointermove", (event) => {
+      if (drag?.handle === handle && drag.pointerId === event.pointerId) updateTarget(event);
+    });
+
+    const finish = (event) => {
+      if (drag?.handle !== handle || drag.pointerId !== event.pointerId) return;
+      const dropped = event.type === "pointerup";
+      if (dropped) updateTarget(event);
+      const { target, after } = drag;
+      drag = null;
+      row.classList.remove("is-dragging");
+      target?.classList.remove("drop-before", "drop-after");
+      if (dropped && target) moveQueueTask(row.dataset.memberQueueRow, target.dataset.memberQueueRow, after);
+    };
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("lostpointercapture", finish);
   });
-  render();
 }
 
 function addWorkflowStep(rawName) {
@@ -3288,7 +3401,6 @@ function filterTasksBySearch(value, targetView = "dashboard") {
   els.searchInput.value = String(value || "").trim();
   dashboardStatFilter = "";
   pendingDoneTaskId = "";
-  pendingConvertTaskId = "";
   ownerPickerTaskId = "";
   projectPickerTaskId = "";
   duePickerTaskId = "";
@@ -3410,8 +3522,9 @@ function switchView(view) {
 function openTaskDialog(id, overrides = {}) {
   const task = id ? state.tasks.find((item) => item.id === id) : null;
   const defaultType = currentView() === "todo" ? "todo" : "issue";
-  const type = overrides.type || task?.type || defaultType;
-  els.dialogTitle.textContent = task ? "項目を編集" : "新規項目";
+  const type = task?.type || overrides.type || defaultType;
+  const typeLabel = type === "todo" ? "Todo" : "Issue";
+  els.dialogTitle.textContent = task ? `${typeLabel} を編集` : `新規 ${typeLabel}`;
   els.deleteTaskBtn.hidden = !task;
   els.createTodoFromIssueBtn.hidden = !(task?.type === "issue" && !isDone(task));
   els.taskId.value = task?.id || "";
@@ -3456,7 +3569,7 @@ function openTaskDialog(id, overrides = {}) {
   renderTaskDialogPickers();
   els.dialog.showModal();
   autoResizeTaskNext();
-  if (taskDialogDraft && taskDialogDraft.id === (task?.id || "")) {
+  if (taskDialogDraft?.type === type && taskDialogDraft.id === (task?.id || "")) {
     restoreTaskDialogDraft();
   }
   previewTaskSchedule();
@@ -3673,16 +3786,6 @@ function clearAutoIssueTitleFlag() {
   delete els.taskTitle.dataset.autoIssueTitleValue;
 }
 
-function clearAutoFilledIssueTitle() {
-  if (els.taskTitle.dataset.autoIssueTitle !== "true") return;
-  if (els.taskTitle.value !== els.taskTitle.dataset.autoIssueTitleValue) {
-    clearAutoIssueTitleFlag();
-    return;
-  }
-  els.taskTitle.value = "";
-  clearAutoIssueTitleFlag();
-}
-
 async function fetchGitLabIssueStatusWithSavedToken(link, checkedAt, promptForToken = false) {
   const token = localStorage.getItem(gitlabTokenKey) || (promptForToken ? ensureGitLabToken() : "");
   return fetchGitLabIssueStatus(link, token, checkedAt);
@@ -3862,6 +3965,7 @@ function closeTaskDialog() {
 function saveDraftAndClose() {
   taskDialogDraft = {
     id: els.taskId.value,
+    type: els.taskType.value,
     title: els.taskTitle.value,
     project: els.taskProject.value,
     owner: els.taskOwner.value,
@@ -3887,8 +3991,8 @@ function saveTask(event) {
   event.preventDefault();
   els.taskLink.setCustomValidity("");
   const id = els.taskId.value || crypto.randomUUID();
-  const type = els.taskType.value;
   const existingTask = state.tasks.find((item) => item.id === id);
+  const type = existingTask?.type || els.taskType.value;
   const previousRecurrenceKey = existingTask?.recurrence === "daily" ? existingTask.recurrenceKey : "";
   const relatedIssues = normalizeRelatedIssues(existingTask?.relatedIssues, existingTask?.link || "");
   const link = normalizeTaskLinkInput(els.taskLink.value, type);
@@ -3972,7 +4076,7 @@ function hasDuplicateIssueLink(taskId, link) {
 }
 
 function clearPendingDoneOnOtherClick(event) {
-  if ((!pendingDoneTaskId && !pendingConvertTaskId) || event.target.closest("[data-done], [data-convert]")) return;
+  if (!pendingDoneTaskId || event.target.closest("[data-done]")) return;
   clearPendingConfirmations();
 }
 
@@ -4029,9 +4133,8 @@ function clearPendingDoneConfirmation() {
 }
 
 function clearPendingConfirmations() {
-  if (!pendingDoneTaskId && !pendingConvertTaskId) return;
+  if (!pendingDoneTaskId) return;
   pendingDoneTaskId = "";
-  pendingConvertTaskId = "";
   render();
 }
 
@@ -4098,7 +4201,6 @@ function saveOwnerChoice(taskId, value) {
   updateTask(taskId, { owner }, `「${state.tasks.find((task) => task.id === taskId)?.title || "項目"}」の担当者を変更`);
   ownerPickerTaskId = "";
   pendingDoneTaskId = "";
-  pendingConvertTaskId = "";
   render();
 }
 
@@ -4595,8 +4697,7 @@ async function initializeIndexedDb() {
     const saved = await idbGet(stateStoreName, "current");
     if (saved?.state?.tasks) {
       suppressHistoryCapture = true;
-      state = migrateState(saved.state);
-      if (discoveryDemoEnabled) state = addGitLabDiscoveryDemoData(state);
+      state = migrateState(discoveryDemoEnabled ? addGitLabDiscoveryDemoData(saved.state) : saved.state);
       lastStateSnapshot = serializeState(state);
       render();
       suppressHistoryCapture = false;
@@ -4713,11 +4814,12 @@ function formatBytes(bytes) {
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
-    if (saved?.tasks?.length) return saved;
+    if (saved?.tasks?.length) return discoveryDemoEnabled ? addGitLabDiscoveryDemoData(saved) : saved;
   } catch {
     localStorage.removeItem(storageKey);
   }
-  return { members: defaultMembers, workflow: defaultWorkflow, tasks: sampleTasks };
+  const initialState = { members: defaultMembers, workflow: defaultWorkflow, tasks: sampleTasks };
+  return discoveryDemoEnabled ? addGitLabDiscoveryDemoData(initialState) : initialState;
 }
 
 function saveState() {
@@ -4894,6 +4996,17 @@ function normalizeGitLabDiscovery(value = {}, members = []) {
 }
 
 function addGitLabDiscoveryDemoData(targetState) {
+  const members = Array.isArray(targetState.members) && targetState.members.length ? targetState.members : defaultMembers;
+  const [self, memberA = self, memberB = memberA] = members;
+  const settings = normalizeGitLabDiscovery(targetState.gitlabDiscovery, members);
+  const memberUsernames = { ...settings.memberUsernames };
+  const assignee = (member, name, fallback) => {
+    memberUsernames[member] ||= fallback;
+    return { name, username: memberUsernames[member] };
+  };
+  const demoSelf = assignee(self, "Demo Self", "demo-self");
+  const demoMemberA = assignee(memberA, "Demo Member A", "demo-member-a");
+  const demoMemberB = assignee(memberB, "Demo Member B", "demo-member-b");
   const demoIssues = [
     {
       state: "opened",
@@ -4901,7 +5014,7 @@ function addGitLabDiscoveryDemoData(targetState) {
       title: "異常終了後に再実行するとエラーになる",
       web_url: "https://gitlab.example.com/step3/external-test-issue/-/issues/745",
       updated_at: "2026-11-15T08:30:00.000Z",
-      assignees: [{ name: "Demo Self", username: "demo-self" }]
+      assignees: [demoSelf]
     },
     {
       state: "opened",
@@ -4909,7 +5022,7 @@ function addGitLabDiscoveryDemoData(targetState) {
       title: "管理画面の検索条件が保持されない",
       web_url: "https://gitlab.example.com/001-sej/issue/-/issues/318",
       updated_at: "2026-11-14T06:15:00.000Z",
-      assignees: [{ name: "Demo Member A", username: "demo-member-a" }]
+      assignees: [demoMemberA]
     },
     {
       state: "opened",
@@ -4917,7 +5030,7 @@ function addGitLabDiscoveryDemoData(targetState) {
       title: "長時間運転後に通知が遅延する",
       web_url: "https://gitlab.example.com/step3/integration-test-issue/-/issues/902",
       updated_at: "2026-11-13T10:45:00.000Z",
-      assignees: [{ name: "Demo Member B", username: "demo-member-b" }]
+      assignees: [demoMemberB]
     },
     {
       state: "opened",
@@ -4925,10 +5038,7 @@ function addGitLabDiscoveryDemoData(targetState) {
       title: "権限変更後にメニュー表示が更新されない",
       web_url: "https://gitlab.example.com/001-sej/issue/-/issues/319",
       updated_at: "2026-11-12T03:20:00.000Z",
-      assignees: [
-        { name: "Demo Self", username: "demo-self" },
-        { name: "Demo Member A", username: "demo-member-a" }
-      ]
+      assignees: [demoSelf, demoMemberA]
     },
     {
       state: "opened",
@@ -4936,25 +5046,45 @@ function addGitLabDiscoveryDemoData(targetState) {
       title: "通信切断時のリトライ回数を確認する",
       web_url: "https://gitlab.example.com/step3/external-test-issue/-/issues/746",
       updated_at: "2026-11-11T01:05:00.000Z",
-      assignees: [{ name: "Demo Member B", username: "demo-member-b" }]
+      assignees: [demoMemberB]
     }
   ].map(normalizeDiscoveredGitLabIssue).filter(Boolean);
-  const settings = normalizeGitLabDiscovery(targetState.gitlabDiscovery, targetState.members);
-  const items = new Map(settings.items.map((item) => [item.key, item]));
-  demoIssues.forEach((item) => items.set(item.key, item));
-  targetState.gitlabDiscovery = {
-    ...settings,
-    serverUrl: settings.serverUrl || "https://gitlab.example.com",
-    memberUsernames: {
-      ...settings.memberUsernames,
-      [targetState.members[0] || "自分"]: settings.memberUsernames[targetState.members[0] || "自分"] || "demo-self",
-      [targetState.members[1] || "メンバーA"]: settings.memberUsernames[targetState.members[1] || "メンバーA"] || "demo-member-a",
-      [targetState.members[2] || "メンバーB"]: settings.memberUsernames[targetState.members[2] || "メンバーB"] || "demo-member-b"
+  const collectedKeys = new Set(targetState.tasks
+    .filter((task) => task.type === "issue")
+    .map((task) => gitLabIssueIdentity(task.link)));
+  const collectedIssues = [
+    {
+      title: "通知一覧を更新すると未読件数がずれる",
+      iid: 320,
+      owner: memberA,
+      assignees: [demoMemberA]
     },
-    items: [...items.values()],
-    lastCheckedAt: new Date().toISOString()
+    {
+      title: "保存に失敗したあと再試行すると入力内容が消える",
+      iid: 321,
+      owner: self,
+      assignees: [demoMemberA, demoMemberB]
+    }
+  ].flatMap(({ title, iid, owner, assignees }) => {
+    const link = `https://gitlab.example.com/001-sej/issue/-/issues/${iid}`;
+    if (collectedKeys.has(gitLabIssueIdentity(link))) return [];
+    const task = issueTask(title, "通知・設定", owner, todayOffset(3), targetState.workflow?.[0] || defaultWorkflow[0], "C", "対応内容を確認する。", "");
+    return [{ ...task, link, gitlab: { state: "opened", title, assignees, assigneesSynced: true } }];
+  });
+  const pendingItems = new Map(demoIssues.map((item) => [item.key, item]));
+  settings.items.forEach((item) => pendingItems.set(item.key, item));
+  return {
+    ...targetState,
+    members,
+    tasks: [...targetState.tasks, ...collectedIssues],
+    gitlabDiscovery: {
+      ...settings,
+      serverUrl: settings.serverUrl || "https://gitlab.example.com",
+      memberUsernames,
+      items: [...pendingItems.values()],
+      lastCheckedAt: settings.lastCheckedAt || new Date().toISOString()
+    }
   };
-  return targetState;
 }
 
 function normalizeSchedulingSettings(value = {}, members = []) {

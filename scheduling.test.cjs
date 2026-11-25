@@ -2,7 +2,7 @@ const { readFileSync } = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = readFileSync(`${__dirname}/app.js`, 'utf8');
-const names = ['normalizeEffortDays', 'normalizeTaskSchedule', 'isCapacityStatus', 'isCapacityIssue', 'recalculateSchedules', 'scheduleWithStatus', 'capacityForDate', 'isWorkingDate', 'nextDateWithCapacity', 'addCalendarDays', 'localDateString', 'applyQueuePosition', 'moveGanttQueueTask'];
+const names = ['normalizeEffortDays', 'normalizeTaskSchedule', 'isCapacityStatus', 'isCapacityIssue', 'recalculateSchedules', 'scheduleWithStatus', 'capacityForDate', 'isWorkingDate', 'nextDateWithCapacity', 'addCalendarDays', 'localDateString', 'applyQueuePosition', 'moveQueueTask'];
 const functions = names.map(name => {
   const start = source.indexOf(`function ${name}(`);
   assert.ok(start >= 0, name);
@@ -65,6 +65,6 @@ const queueState = {
 context.applyQueuePosition(queueState, '我', '2', 1);
 assert.deepEqual(queueState.tasks.sort((a, b) => a.schedule.queueOrder - b.schedule.queueOrder).map(task => task.id), ['2', '0', '1']);
 context.state = queueState;
-context.moveGanttQueueTask('0', '1', true);
+context.moveQueueTask('0', '1', true);
 assert.deepEqual(queueState.tasks.sort((a, b) => a.schedule.queueOrder - b.schedule.queueOrder).map(task => task.id), ['2', '1', '0']);
 console.log('Scheduling regression checks passed');
