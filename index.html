@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TaskManager</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20261125-member-queue-review">
+  <link rel="stylesheet" href="styles.css?v=20261126-quality-collapse">
 </head>
 
 <body>
@@ -196,17 +196,21 @@
             <input id="taskOriginalEta" type="hidden">
           </div>
         </fieldset>
-        <fieldset id="qualityAnalysisSection" class="quality-section">
-          <legend>品質分析</legend>
-          <div class="form-grid task-meta-grid">
-            <label>原因・対策分析<div id="qualityAnalysisStatusPicker" class="dialog-picker"></div><input id="qualityAnalysisStatus" type="hidden"></label>
-            <label>経路タイプ<div id="qualityRouteTypePicker" class="dialog-picker"></div><input id="qualityRouteType" type="hidden"></label>
-            <label>関連範囲<div id="qualityScopePicker" class="dialog-picker"></div><input id="qualityScope" type="hidden"></label>
-            <label>再現性<div id="qualityReproducibilityPicker" class="dialog-picker"></div><input id="qualityReproducibility" type="hidden"></label>
-            <label>外部依存<div id="qualityExternalDependencyPicker" class="dialog-picker"></div><input id="qualityExternalDependency" type="hidden"></label>
-            <label>発見フェーズ<div id="qualityDiscoveryPhasePicker" class="dialog-picker"></div><input id="qualityDiscoveryPhase" type="hidden"></label>
+        <section id="qualityAnalysisSection" class="quality-section collapsible-quality-section">
+          <button id="qualityAnalysisToggle" class="quality-section-toggle" type="button" aria-expanded="false" aria-controls="qualityAnalysisBody" onclick="toggleQualityAnalysisSection()">
+            <span>品質分析</span><span class="quality-section-chevron" aria-hidden="true">⌄</span>
+          </button>
+          <div id="qualityAnalysisBody" class="quality-analysis-body" hidden>
+            <div class="form-grid task-meta-grid">
+              <label>原因・対策分析<div id="qualityAnalysisStatusPicker" class="dialog-picker"></div><input id="qualityAnalysisStatus" type="hidden"></label>
+              <label>経路タイプ<div id="qualityRouteTypePicker" class="dialog-picker"></div><input id="qualityRouteType" type="hidden"></label>
+              <label>関連範囲<div id="qualityScopePicker" class="dialog-picker"></div><input id="qualityScope" type="hidden"></label>
+              <label>再現性<div id="qualityReproducibilityPicker" class="dialog-picker"></div><input id="qualityReproducibility" type="hidden"></label>
+              <label>外部依存<div id="qualityExternalDependencyPicker" class="dialog-picker"></div><input id="qualityExternalDependency" type="hidden"></label>
+              <label>発見フェーズ<div id="qualityDiscoveryPhasePicker" class="dialog-picker"></div><input id="qualityDiscoveryPhase" type="hidden"></label>
+            </div>
           </div>
-        </fieldset>
+        </section>
         <label class="full-label">メモ<textarea id="taskNotes" rows="3" maxlength="300"></textarea></label>
         <div class="attachment-panel">
           <div class="attachment-toolbar">
@@ -289,7 +293,7 @@
 
   <datalist id="projectList"></datalist>
   <datalist id="ownerList"></datalist>
-  <script src="app.js?v=20261125-member-queue-review"></script>
+  <script src="app.js?v=20261126-quality-collapse"></script>
 </body>
 
 </html>

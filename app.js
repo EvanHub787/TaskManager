@@ -167,6 +167,8 @@ const els = {
   taskLink: document.querySelector("#taskLink"),
   taskNotes: document.querySelector("#taskNotes"),
   qualityAnalysisSection: document.querySelector("#qualityAnalysisSection"),
+  qualityAnalysisToggle: document.querySelector("#qualityAnalysisToggle"),
+  qualityAnalysisBody: document.querySelector("#qualityAnalysisBody"),
   qualityAnalysisStatus: document.querySelector("#qualityAnalysisStatus"),
   qualityAnalysisStatusPicker: document.querySelector("#qualityAnalysisStatusPicker"),
   qualityRouteType: document.querySelector("#qualityRouteType"),
@@ -3540,6 +3542,7 @@ function openTaskDialog(id, overrides = {}) {
   els.taskGitAssignees.textContent = type === "issue" ? gitLabAssigneeLabel(dialogGitLab) : "—";
   els.taskGitAssignees.className = `readonly-assignees${normalizeGitLabStatus(dialogGitLab)?.assigneesSynced ? "" : " unsynced"}`;
   taskDialogPickerOpen = "";
+  setQualityAnalysisExpanded(false);
   els.taskDue.value = overrides.due ?? task?.due ?? defaultDueForType(type);
   els.taskPriority.value = overrides.priority || task?.priority || "なし";
   els.taskRecurrence.value = type === "todo" ? overrides.recurrence || task?.recurrence || "" : "";
@@ -3636,6 +3639,16 @@ function syncQualityAnalysisSection() {
   const isIssue = els.taskType.value === "issue";
   els.qualityAnalysisSection.hidden = !isIssue;
   els.taskLinkLabel.hidden = false;
+}
+
+function setQualityAnalysisExpanded(expanded) {
+  els.qualityAnalysisToggle.setAttribute("aria-expanded", String(expanded));
+  els.qualityAnalysisBody.hidden = !expanded;
+  els.qualityAnalysisSection.classList.toggle("is-open", expanded);
+}
+
+function toggleQualityAnalysisSection() {
+  setQualityAnalysisExpanded(els.qualityAnalysisToggle.getAttribute("aria-expanded") !== "true");
 }
 
 function syncScheduleSection() {
